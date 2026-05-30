@@ -1,0 +1,28 @@
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+
+# Virtual environment
+.venv/
+
+# Environment variables / secrets
+.env
+
+# Local data
+data/*.db
+data/*.db-journal
+data/*.sqlite
+data/*.sqlite3
+
+# Logs
+logs/*.log
+
+# YOLO / Ultralytics output
+runs/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.vscode/
