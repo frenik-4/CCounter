@@ -3,6 +3,7 @@ import time
 from datetime import datetime
 
 import cv2
+import numpy as np
 from ultralytics import YOLO
 
 from src.ccounter.config import (
@@ -16,8 +17,13 @@ from src.ccounter.config import (
     SAVE_SNAPSHOTS,
     SNAPSHOT_DIR,
     DETECTION_SAVE_INTERVAL_SECONDS,
+    DETECTION_ZONE,
+    DRAW_DETECTION_ZONE,
 )
 from src.ccounter.database import Database
+
+
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 
 def open_stream(rtsp_url: str) -> cv2.VideoCapture:
@@ -33,6 +39,13 @@ def open_stream(rtsp_url: str) -> cv2.VideoCapture:
 
     print("RTSP-ström öppnad.")
     return cap
+
+
+def point_inside_zone(point: tuple[int, int]) -> bool:
+    zone = np.array(DETECTION_ZONE, dtype=np.int32)
+    result = cv2.pointPolygonTest(zone, point, False)
+
+    return result >= 0
 
 
 def detect_vehicles(model: YOLO, frame):
@@ -54,26 +67,61 @@ def detect_vehicles(model: YOLO, frame):
 
             x1, y1, x2, y2 = box.xyxy[0].tolist()
 
+            x1 = int(x1)
+            y1 = int(y1)
+            x2 = int(x2)
+            y2 = int(y2)
+
+            center_x = int((x1 + x2) / 2)
+            center_y = int((y1 + y2) / 2)
+
+            center = (center_x, center_y)
+
+            if not point_inside_zone(center):
+                continue
+
             detections.append(
                 {
                     "class_id": class_id,
                     "class_name": model.names[class_id],
                     "confidence": confidence,
-                    "bbox": (
-                        int(x1),
-                        int(y1),
-                        int(x2),
-                        int(y2),
-                    ),
+                    "bbox": (x1, y1, x2, y2),
+                    "center": center,
                 }
             )
 
     return detections
 
 
+def draw_detection_zone(frame) -> None:
+    if not DRAW_DETECTION_ZONE:
+        return
+
+    zone = np.array(DETECTION_ZONE, dtype=np.int32)
+
+    cv2.polylines(
+        frame,
+        [zone],
+        isClosed=True,
+        color=(255, 255, 0),
+        thickness=2,
+    )
+
+    cv2.putText(
+        frame,
+        "Detection zone",
+        DETECTION_ZONE[0],
+        cv2.FONT_HERSHEY_SIMPLEX,
+        0.7,
+        (255, 255, 0),
+        2,
+    )
+
+
 def draw_detections(frame, detections) -> None:
     for detection in detections:
         x1, y1, x2, y2 = detection["bbox"]
+        center_x, center_y = detection["center"]
         class_name = detection["class_name"]
         confidence = detection["confidence"]
 
@@ -85,6 +133,14 @@ def draw_detections(frame, detections) -> None:
             (x2, y2),
             (0, 255, 0),
             2,
+        )
+
+        cv2.circle(
+            frame,
+            (center_x, center_y),
+            5,
+            (0, 0, 255),
+            -1,
         )
 
         cv2.putText(
@@ -109,6 +165,7 @@ def save_snapshot(frame, detection: dict) -> str:
     snapshot_path = os.path.join(SNAPSHOT_DIR, filename)
 
     frame_to_save = frame.copy()
+    draw_detection_zone(frame_to_save)
     draw_detections(frame_to_save, [detection])
 
     cv2.imwrite(snapshot_path, frame_to_save)
@@ -139,8 +196,9 @@ def should_save_detection(
 
 
 def main() -> None:
-    print("Startar CCounter med YOLO och sparning...")
+    print("Startar CCounter med YOLO och detection zone...")
     print(f"Laddar modell: {YOLO_MODEL}")
+    print(f"Detection zone: {DETECTION_ZONE}")
 
     model = YOLO(YOLO_MODEL)
 
@@ -185,7 +243,7 @@ def main() -> None:
                     total = db.count_detections()
 
                     print(
-                        "Sparad upptäckt: "
+                        "Sparad upptäckt inom zon: "
                         f"{detection['class_name']} | "
                         f"confidence={detection['confidence']:.2f} | "
                         f"total={total} | "
@@ -198,14 +256,15 @@ def main() -> None:
 
                 print(
                     f"FPS cirka: {fps:.1f} | "
-                    f"Fordon i bild: {len(detections)} | "
+                    f"Fordon i zon: {len(detections)} | "
                     f"Sparade totalt: {db.count_detections()}"
                 )
 
             if SHOW_WINDOW:
+                draw_detection_zone(frame)
                 draw_detections(frame, detections)
 
-                cv2.imshow("CCounter - YOLO vehicle detection", frame)
+                cv2.imshow("CCounter - Detection zone", frame)
 
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):

@@ -22,6 +22,21 @@ def get_int_set(name: str, default: set[int]) -> set[int]:
     return {int(x.strip()) for x in value.split(",")}
 
 
+def get_polygon(name: str, default: list[tuple[int, int]]) -> list[tuple[int, int]]:
+    value = os.getenv(name)
+
+    if not value:
+        return default
+
+    points = []
+
+    for point in value.split(";"):
+        x, y = point.split(",")
+        points.append((int(x.strip()), int(y.strip())))
+
+    return points
+
+
 RTSP_URL = os.getenv("RTSP_URL")
 SHOW_WINDOW = get_bool("SHOW_WINDOW", True)
 
@@ -38,6 +53,21 @@ SNAPSHOT_DIR = os.getenv("SNAPSHOT_DIR", "data/snapshots")
 DETECTION_SAVE_INTERVAL_SECONDS = int(
     os.getenv("DETECTION_SAVE_INTERVAL_SECONDS", "10")
 )
+
+DETECTION_ZONE = get_polygon(
+    "DETECTION_ZONE",
+    [
+        (0, 250),
+        (900, 220),
+        (1600, 260),
+        (1600, 390),
+        (1050, 390),
+        (750, 520),
+        (0, 520),
+    ],
+)
+
+DRAW_DETECTION_ZONE = get_bool("DRAW_DETECTION_ZONE", True)
 
 if not RTSP_URL:
     raise ValueError("RTSP_URL saknas. Lägg den i .env")
