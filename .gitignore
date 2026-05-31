@@ -38,3 +38,5 @@ data/snapshots/
 # Local database
 data/
 .env
+
+.env

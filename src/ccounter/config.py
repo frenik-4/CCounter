@@ -37,19 +37,29 @@ def get_polygon(name: str, default: list[tuple[int, int]]) -> list[tuple[int, in
     return points
 
 
+def get_int_tuple(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
+    value = os.getenv(name)
+
+    if not value:
+        return default
+
+    return tuple(int(x.strip()) for x in value.split(","))
+
+
 RTSP_URL = os.getenv("RTSP_URL")
 SHOW_WINDOW = get_bool("SHOW_WINDOW", True)
 
 YOLO_MODEL = os.getenv("YOLO_MODEL", "yolov8n.pt")
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.35"))
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.55"))
 
 VEHICLE_CLASSES = get_int_set("VEHICLE_CLASSES", {2, 3, 5, 7})
 
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/ccounter.db")
 
-SAVE_DETECTIONS = get_bool("SAVE_DETECTIONS", True)
+SAVE_DETECTIONS = get_bool("SAVE_DETECTIONS", False)
 SAVE_SNAPSHOTS = get_bool("SAVE_SNAPSHOTS", True)
 SNAPSHOT_DIR = os.getenv("SNAPSHOT_DIR", "data/snapshots")
+
 DETECTION_SAVE_INTERVAL_SECONDS = int(
     os.getenv("DETECTION_SAVE_INTERVAL_SECONDS", "10")
 )
@@ -57,17 +67,30 @@ DETECTION_SAVE_INTERVAL_SECONDS = int(
 DETECTION_ZONE = get_polygon(
     "DETECTION_ZONE",
     [
-        (0, 250),
-        (900, 220),
-        (1600, 260),
-        (1600, 390),
-        (1050, 390),
-        (750, 520),
-        (0, 520),
+        (140, 285),
+        (360, 270),
+        (720, 240),
+        (1040, 215),
+        (1160, 205),
+        (1240, 230),
+        (1160, 285),
+        (1040, 350),
+        (760, 445),
+        (300, 485),
+        (140, 475),
     ],
 )
 
 DRAW_DETECTION_ZONE = get_bool("DRAW_DETECTION_ZONE", True)
+
+COUNT_LINE = get_int_tuple("COUNT_LINE", (460, 440, 1040, 295))
+DRAW_COUNT_LINE = get_bool("DRAW_COUNT_LINE", True)
+
+TRACKER_MAX_DISTANCE = int(os.getenv("TRACKER_MAX_DISTANCE", "120"))
+TRACKER_MAX_MISSING_FRAMES = int(os.getenv("TRACKER_MAX_MISSING_FRAMES", "25"))
+
+BEST_OF_TWO_ENABLED = get_bool("BEST_OF_TWO_ENABLED", True)
+BEST_OF_TWO_DELAY_SECONDS = float(os.getenv("BEST_OF_TWO_DELAY_SECONDS", "1.5"))
 
 if not RTSP_URL:
     raise ValueError("RTSP_URL saknas. Lägg den i .env")

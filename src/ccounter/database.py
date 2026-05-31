@@ -26,6 +26,21 @@ class Database:
             );
             """
         )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS passages (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                object_id INTEGER NOT NULL,
+                class_name TEXT NOT NULL,
+                confidence REAL NOT NULL,
+                direction TEXT NOT NULL,
+                snapshot_path TEXT
+            );
+            """
+        )
+
         self.conn.commit()
 
     def insert_detection(
@@ -56,8 +71,46 @@ class Database:
 
         self.conn.commit()
 
+    def insert_passage(
+        self,
+        object_id: int,
+        class_name: str,
+        confidence: float,
+        direction: str,
+        snapshot_path: str | None = None,
+    ) -> None:
+        timestamp = datetime.now().isoformat(timespec="seconds")
+
+        self.conn.execute(
+            """
+            INSERT INTO passages (
+                timestamp,
+                object_id,
+                class_name,
+                confidence,
+                direction,
+                snapshot_path
+            )
+            VALUES (?, ?, ?, ?, ?, ?);
+            """,
+            (
+                timestamp,
+                object_id,
+                class_name,
+                confidence,
+                direction,
+                snapshot_path,
+            ),
+        )
+
+        self.conn.commit()
+
     def count_detections(self) -> int:
         cursor = self.conn.execute("SELECT COUNT(*) FROM detections;")
+        return int(cursor.fetchone()[0])
+
+    def count_passages(self) -> int:
+        cursor = self.conn.execute("SELECT COUNT(*) FROM passages;")
         return int(cursor.fetchone()[0])
 
     def close(self) -> None:
