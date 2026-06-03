@@ -19,12 +19,14 @@ from src.ccounter.config import (
     DRAW_DETECTION_ZONE,
     COUNT_LINE,
     DRAW_COUNT_LINE,
+    LINES,
+    DRAW_LINES,
     TRACKER_MAX_DISTANCE,
     TRACKER_MAX_MISSING_FRAMES,
 )
 from src.ccounter.database import Database
 from src.ccounter.tracker import CentroidTracker
-from src.ccounter.counter import LineCounter
+from src.ccounter.counter import MultiLineCounter
 
 
 # Testa senare igen när ethernet är inkopplat.
@@ -125,6 +127,10 @@ def draw_detection_zone(frame) -> None:
 
 
 def draw_count_line(frame) -> None:
+    """
+    Gammal enkel count line.
+    Vi behåller den temporärt för jämförelse/debug.
+    """
     if not DRAW_COUNT_LINE:
         return
 
@@ -140,13 +146,43 @@ def draw_count_line(frame) -> None:
 
     cv2.putText(
         frame,
-        "Count line",
+        "Old count line",
         (x1, max(y1 - 10, 20)),
         cv2.FONT_HERSHEY_SIMPLEX,
         0.7,
         (0, 255, 255),
         2,
     )
+
+
+def draw_lines(frame) -> None:
+    """
+    Nya konfigurerbara linjer från LINES.
+    Dessa används för faktisk räkning.
+    """
+    if not DRAW_LINES:
+        return
+
+    for line_name, line in LINES.items():
+        x1, y1, x2, y2 = line
+
+        cv2.line(
+            frame,
+            (x1, y1),
+            (x2, y2),
+            (0, 0, 255),
+            3,
+        )
+
+        cv2.putText(
+            frame,
+            line_name,
+            (x1, max(y1 - 10, 20)),
+            cv2.FONT_HERSHEY_SIMPLEX,
+            0.6,
+            (0, 0, 255),
+            2,
+        )
 
 
 def draw_tracked_objects(frame, tracked_objects: dict[int, dict]) -> None:
@@ -193,6 +229,7 @@ def save_passage_snapshot(
     frame,
     object_id: int,
     obj: dict,
+    line_name: str,
     direction: str,
 ) -> str:
     os.makedirs(SNAPSHOT_DIR, exist_ok=True)
@@ -202,8 +239,8 @@ def save_passage_snapshot(
     confidence = obj["confidence"]
 
     filename = (
-        f"{timestamp}_passage_"
-        f"id{object_id}_{class_name}_{direction}_{confidence:.2f}.jpg"
+        f"{timestamp}_event_"
+        f"id{object_id}_{class_name}_{line_name}_{direction}_{confidence:.2f}.jpg"
     )
 
     snapshot_path = os.path.join(SNAPSHOT_DIR, filename)
@@ -212,6 +249,7 @@ def save_passage_snapshot(
 
     draw_detection_zone(frame_to_save)
     draw_count_line(frame_to_save)
+    draw_lines(frame_to_save)
     draw_tracked_objects(frame_to_save, {object_id: obj})
 
     cv2.imwrite(snapshot_path, frame_to_save)
@@ -219,11 +257,21 @@ def save_passage_snapshot(
     return snapshot_path
 
 
+def get_event_type_and_category(line_name: str) -> tuple[str, str]:
+    if line_name == "parking_entry_line":
+        return "parking_entry", "parking_traffic"
+
+    if line_name == "parking_exit_line":
+        return "parking_exit", "parking_traffic"
+
+    return "road_passage", "road_traffic"
+
+
 def handle_passages(
     db: Database,
     frame,
     tracked_objects: dict[int, dict],
-    line_counter: LineCounter,
+    line_counter: MultiLineCounter,
 ) -> None:
     for object_id, obj in tracked_objects.items():
         if obj.get("missing", 0) > 0:
@@ -232,44 +280,57 @@ def handle_passages(
         previous_center = obj["previous_center"]
         current_center = obj["center"]
 
-        direction = line_counter.check_crossing(
+        crossings = line_counter.check_crossings(
             object_id=object_id,
             previous_point=previous_center,
             current_point=current_center,
         )
 
-        if direction is None:
-            continue
+        for crossing in crossings:
+            line_name = crossing["line_name"]
+            direction = crossing["direction"]
 
-        snapshot_path = None
+            event_type, final_category = get_event_type_and_category(line_name)
 
-        if SAVE_SNAPSHOTS:
-            snapshot_path = save_passage_snapshot(
-                frame=frame,
-                object_id=object_id,
-                obj=obj,
+            snapshot_path = None
+
+            if SAVE_SNAPSHOTS:
+                snapshot_path = save_passage_snapshot(
+                    frame=frame,
+                    object_id=object_id,
+                    obj=obj,
+                    line_name=line_name,
+                    direction=direction,
+                )
+
+            db.insert_event(
+                event_type=event_type,
+                track_id=object_id,
+                object_class=obj["class_name"],
+                final_category=final_category,
                 direction=direction,
+                line_name=line_name,
+                zone_name="road_zone",
+                confidence=obj["confidence"],
+                bbox=obj["bbox"],
+                center=obj["center"],
+                snapshot_path=snapshot_path,
             )
 
-        db.insert_passage(
-            object_id=object_id,
-            class_name=obj["class_name"],
-            confidence=obj["confidence"],
-            direction=direction,
-            snapshot_path=snapshot_path,
-        )
+            total = db.count_events()
 
-        total = db.count_passages()
-
-        print(
-            "PASSAGE: "
-            f"id={object_id} | "
-            f"class={obj['class_name']} | "
-            f"confidence={obj['confidence']:.2f} | "
-            f"direction={direction} | "
-            f"total={total} | "
-            f"snapshot={snapshot_path}"
-        )
+            print(
+                "EVENT: "
+                f"id={object_id} | "
+                f"type={event_type} | "
+                f"class={obj['class_name']} | "
+                f"category={final_category} | "
+                f"line={line_name} | "
+                f"direction={direction} | "
+                f"confidence={obj['confidence']:.2f} | "
+                f"total={total} | "
+                f"snapshot={snapshot_path}"
+            )
 
 
 def reconnect(rtsp_url: str, delay_seconds: int = 5) -> cv2.VideoCapture:
@@ -279,11 +340,12 @@ def reconnect(rtsp_url: str, delay_seconds: int = 5) -> cv2.VideoCapture:
 
 
 def main() -> None:
-    print("Startar CCounter med YOLO, tracking och raknelinje...")
+    print("Startar CCounter med YOLO, tracking och flera linjer...")
     print(f"Modell: {YOLO_MODEL}")
     print(f"Confidence threshold: {CONFIDENCE_THRESHOLD}")
     print(f"Detection zone: {DETECTION_ZONE}")
-    print(f"Count line: {COUNT_LINE}")
+    print(f"Old count line: {COUNT_LINE}")
+    print(f"Lines: {LINES}")
 
     model = YOLO(YOLO_MODEL)
     print("YOLO-modell laddad.")
@@ -295,7 +357,7 @@ def main() -> None:
         max_missing_frames=TRACKER_MAX_MISSING_FRAMES,
     )
 
-    line_counter = LineCounter(COUNT_LINE)
+    line_counter = MultiLineCounter(LINES)
 
     cap = open_stream(RTSP_URL)
 
@@ -333,7 +395,8 @@ def main() -> None:
                 fps = frame_count / elapsed if elapsed > 0 else 0
 
                 active_tracks = sum(
-                    1 for obj in tracked_objects.values()
+                    1
+                    for obj in tracked_objects.values()
                     if obj.get("missing", 0) == 0
                 )
 
@@ -341,17 +404,18 @@ def main() -> None:
                     f"FPS cirka: {fps:.1f} | "
                     f"Detections: {len(detections)} | "
                     f"Tracks: {active_tracks} | "
-                    f"Passager totalt: {db.count_passages()}"
+                    f"Events totalt: {db.count_events()}"
                 )
 
             if SHOW_WINDOW:
                 draw_detection_zone(frame)
                 draw_count_line(frame)
+                draw_lines(frame)
                 draw_tracked_objects(frame, tracked_objects)
 
                 cv2.putText(
                     frame,
-                    f"Passages: {db.count_passages()}",
+                    f"Events: {db.count_events()}",
                     (20, 40),
                     cv2.FONT_HERSHEY_SIMPLEX,
                     1.0,
@@ -359,7 +423,7 @@ def main() -> None:
                     2,
                 )
 
-                cv2.imshow("CCounter - Tracking and count line", frame)
+                cv2.imshow("CCounter - Tracking and multi-line counting", frame)
 
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):

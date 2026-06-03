@@ -45,6 +45,36 @@ def get_int_tuple(name: str, default: tuple[int, ...]) -> tuple[int, ...]:
 
     return tuple(int(x.strip()) for x in value.split(","))
 
+def get_lines(name: str, default: dict[str, tuple[int, int, int, int]]) -> dict[str, tuple[int, int, int, int]]:
+    value = os.getenv(name)
+
+    if not value:
+        return default
+
+    lines = {}
+
+    for line_config in value.split(";"):
+        line_name, coordinates = line_config.split(":")
+        x1, y1, x2, y2 = coordinates.split(",")
+
+        lines[line_name.strip()] = (
+            int(x1.strip()),
+            int(y1.strip()),
+            int(x2.strip()),
+            int(y2.strip()),
+        )
+
+    return lines
+
+LINES = get_lines(
+    "LINES",
+    {
+        "main_count_line": (675, 195, 675, 420),
+        "parking_entry_line": (420, 430, 950, 300),
+    },
+)
+
+DRAW_LINES = get_bool("DRAW_LINES", True)
 
 RTSP_URL = os.getenv("RTSP_URL")
 SHOW_WINDOW = get_bool("SHOW_WINDOW", True)

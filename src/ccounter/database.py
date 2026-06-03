@@ -12,105 +12,231 @@ class Database:
             os.makedirs(folder, exist_ok=True)
 
         self.conn = sqlite3.connect(db_path)
+        self.conn.row_factory = sqlite3.Row
+
         self.create_tables()
 
     def create_tables(self) -> None:
         self.conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS detections (
+            CREATE TABLE IF NOT EXISTS events (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
+
                 timestamp TEXT NOT NULL,
-                class_name TEXT NOT NULL,
-                confidence REAL NOT NULL,
-                snapshot_path TEXT
+
+                event_type TEXT NOT NULL,
+                track_id INTEGER,
+                object_class TEXT,
+                final_category TEXT,
+
+                direction TEXT,
+                line_name TEXT,
+                zone_name TEXT,
+
+                confidence REAL,
+
+                bbox_x1 INTEGER,
+                bbox_y1 INTEGER,
+                bbox_x2 INTEGER,
+                bbox_y2 INTEGER,
+                center_x INTEGER,
+                center_y INTEGER,
+
+                plate_detected INTEGER DEFAULT 0,
+                plate_text TEXT,
+                plate_confidence REAL,
+                plate_group TEXT,
+
+                excluded_from_public_stats INTEGER DEFAULT 0,
+                excluded_reason TEXT,
+
+                snapshot_path TEXT,
+
+                created_at TEXT NOT NULL
             );
             """
         )
 
         self.conn.execute(
             """
-            CREATE TABLE IF NOT EXISTS passages (
+            CREATE TABLE IF NOT EXISTS known_plates (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                timestamp TEXT NOT NULL,
-                object_id INTEGER NOT NULL,
-                class_name TEXT NOT NULL,
-                confidence REAL NOT NULL,
-                direction TEXT NOT NULL,
-                snapshot_path TEXT
+
+                plate_text TEXT NOT NULL UNIQUE,
+                label TEXT,
+                group_name TEXT,
+
+                exclude_from_public_stats INTEGER DEFAULT 0,
+                exclude_from_internal_count INTEGER DEFAULT 0,
+
+                notes TEXT,
+
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            );
+            """
+        )
+
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS public_stats_hourly (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                hour TEXT NOT NULL,
+                category TEXT NOT NULL,
+                event_type TEXT NOT NULL,
+                direction TEXT,
+
+                count INTEGER NOT NULL,
+
+                created_at TEXT NOT NULL,
+
+                UNIQUE(hour, category, event_type, direction)
             );
             """
         )
 
         self.conn.commit()
 
-    def insert_detection(
+    def insert_event(
         self,
-        class_name: str,
-        confidence: float,
+        event_type: str,
+        track_id: int | None = None,
+        object_class: str | None = None,
+        final_category: str | None = None,
+        direction: str | None = None,
+        line_name: str | None = None,
+        zone_name: str | None = None,
+        confidence: float | None = None,
+        bbox: tuple[int, int, int, int] | None = None,
+        center: tuple[int, int] | None = None,
+        plate_detected: bool = False,
+        plate_text: str | None = None,
+        plate_confidence: float | None = None,
+        plate_group: str | None = None,
+        excluded_from_public_stats: bool = False,
+        excluded_reason: str | None = None,
         snapshot_path: str | None = None,
     ) -> None:
-        timestamp = datetime.now().isoformat(timespec="seconds")
+        now = datetime.now().isoformat(timespec="seconds")
+
+        bbox_x1 = bbox_y1 = bbox_x2 = bbox_y2 = None
+        if bbox is not None:
+            bbox_x1, bbox_y1, bbox_x2, bbox_y2 = bbox
+
+        center_x = center_y = None
+        if center is not None:
+            center_x, center_y = center
 
         self.conn.execute(
             """
-            INSERT INTO detections (
+            INSERT INTO events (
                 timestamp,
-                class_name,
+                event_type,
+                track_id,
+                object_class,
+                final_category,
+                direction,
+                line_name,
+                zone_name,
                 confidence,
-                snapshot_path
+                bbox_x1,
+                bbox_y1,
+                bbox_x2,
+                bbox_y2,
+                center_x,
+                center_y,
+                plate_detected,
+                plate_text,
+                plate_confidence,
+                plate_group,
+                excluded_from_public_stats,
+                excluded_reason,
+                snapshot_path,
+                created_at
             )
-            VALUES (?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
-                timestamp,
-                class_name,
+                now,
+                event_type,
+                track_id,
+                object_class,
+                final_category,
+                direction,
+                line_name,
+                zone_name,
                 confidence,
+                bbox_x1,
+                bbox_y1,
+                bbox_x2,
+                bbox_y2,
+                center_x,
+                center_y,
+                int(plate_detected),
+                plate_text,
+                plate_confidence,
+                plate_group,
+                int(excluded_from_public_stats),
+                excluded_reason,
                 snapshot_path,
+                now,
             ),
         )
 
         self.conn.commit()
 
-    def insert_passage(
+    def add_known_plate(
         self,
-        object_id: int,
-        class_name: str,
-        confidence: float,
-        direction: str,
-        snapshot_path: str | None = None,
+        plate_text: str,
+        label: str | None = None,
+        group_name: str | None = None,
+        exclude_from_public_stats: bool = False,
+        exclude_from_internal_count: bool = False,
+        notes: str | None = None,
     ) -> None:
-        timestamp = datetime.now().isoformat(timespec="seconds")
+        now = datetime.now().isoformat(timespec="seconds")
 
         self.conn.execute(
             """
-            INSERT INTO passages (
-                timestamp,
-                object_id,
-                class_name,
-                confidence,
-                direction,
-                snapshot_path
+            INSERT OR REPLACE INTO known_plates (
+                plate_text,
+                label,
+                group_name,
+                exclude_from_public_stats,
+                exclude_from_internal_count,
+                notes,
+                created_at,
+                updated_at
             )
-            VALUES (?, ?, ?, ?, ?, ?);
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?);
             """,
             (
-                timestamp,
-                object_id,
-                class_name,
-                confidence,
-                direction,
-                snapshot_path,
+                plate_text.upper().replace(" ", ""),
+                label,
+                group_name,
+                int(exclude_from_public_stats),
+                int(exclude_from_internal_count),
+                notes,
+                now,
+                now,
             ),
         )
 
         self.conn.commit()
 
-    def count_detections(self) -> int:
-        cursor = self.conn.execute("SELECT COUNT(*) FROM detections;")
+    def count_events(self) -> int:
+        cursor = self.conn.execute("SELECT COUNT(*) FROM events;")
         return int(cursor.fetchone()[0])
 
-    def count_passages(self) -> int:
-        cursor = self.conn.execute("SELECT COUNT(*) FROM passages;")
+    def count_public_events(self) -> int:
+        cursor = self.conn.execute(
+            """
+            SELECT COUNT(*)
+            FROM events
+            WHERE excluded_from_public_stats = 0;
+            """
+        )
         return int(cursor.fetchone()[0])
 
     def close(self) -> None:
