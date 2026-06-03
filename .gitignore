@@ -37,6 +37,11 @@ data/snapshots/
 
 # Local database
 data/
+
+# Local exports
+exports/
+.env
+
 .env
 
 .env
