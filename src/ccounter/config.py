@@ -83,6 +83,10 @@ YOLO_MODEL = os.getenv("YOLO_MODEL", "yolov8n.pt")
 CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.55"))
 
 VEHICLE_CLASSES = get_int_set("VEHICLE_CLASSES", {2, 3, 5, 7})
+DETECTION_CLASSES = get_int_set(
+    "DETECTION_CLASSES",
+    {0, 1, 2, 3, 5, 7, 15, 16, 17, 18, 19},
+)
 
 DATABASE_PATH = os.getenv("DATABASE_PATH", "data/ccounter.db")
 

@@ -12,6 +12,7 @@ from src.ccounter.config import (
     YOLO_MODEL,
     CONFIDENCE_THRESHOLD,
     VEHICLE_CLASSES,
+    DETECTION_CLASSES,
     DATABASE_PATH,
     SAVE_SNAPSHOTS,
     SNAPSHOT_DIR,
@@ -71,9 +72,8 @@ def detect_vehicles(model: YOLO, frame) -> list[dict]:
             class_id = int(box.cls[0])
             confidence = float(box.conf[0])
 
-            if class_id not in VEHICLE_CLASSES:
+            if class_id not in DETECTION_CLASSES:
                 continue
-
             x1, y1, x2, y2 = box.xyxy[0].tolist()
 
             x1 = int(x1)
