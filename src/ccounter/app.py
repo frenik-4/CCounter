@@ -27,6 +27,7 @@ from src.ccounter.config import (
 from src.ccounter.database import Database
 from src.ccounter.tracker import CentroidTracker
 from src.ccounter.counter import MultiLineCounter
+from src.ccounter.classifier import classify_object
 
 
 # Testa senare igen när ethernet är inkopplat.
@@ -257,15 +258,14 @@ def save_passage_snapshot(
     return snapshot_path
 
 
-def get_event_type_and_category(line_name: str) -> tuple[str, str]:
+def get_event_type(line_name: str) -> str:
     if line_name == "parking_entry_line":
-        return "parking_entry", "parking_traffic"
+        return "parking_entry"
 
     if line_name == "parking_exit_line":
-        return "parking_exit", "parking_traffic"
+        return "parking_exit"
 
-    return "road_passage", "road_traffic"
-
+    return "road_passage"
 
 def handle_passages(
     db: Database,
@@ -290,8 +290,12 @@ def handle_passages(
             line_name = crossing["line_name"]
             direction = crossing["direction"]
 
-            event_type, final_category = get_event_type_and_category(line_name)
+            event_type = get_event_type(line_name)
 
+            final_category = classify_object(
+                object_class=obj["class_name"],
+                line_name=line_name,
+            )
             snapshot_path = None
 
             if SAVE_SNAPSHOTS:
