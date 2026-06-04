@@ -50,6 +50,7 @@ Done:
 - object category classifier
 - safe public stats export foundation
 - architecture documentation
+- 1. Test multi-line drawing and event counting with live stream.
 
 ## Current camera
 
@@ -66,9 +67,16 @@ Planned camera:
 - ethernet/PoE
 - expected to provide better RTSP quality
 
+Planned server:
+- Optiplex Dell Precision 3430
+- i5-8500
+- 16 gb ram
+- 256 gb ssd
+- Linux
+
 ## Next steps
 
-1. Test multi-line drawing and event counting with live stream.
+
 2. Tune detection zone with the new camera.
 3. Tune main road line and parking entry line.
 4. Add parking exit line if needed.
