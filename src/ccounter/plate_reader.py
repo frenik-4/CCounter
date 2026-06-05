@@ -21,6 +21,8 @@ class PlateReader:
         text = text.replace(".", "")
         text = text.replace(":", "")
         text = text.replace("_", "")
+        text = text.replace("/", "")
+        text = text.replace("\\", "")
         return text
 
     def extract_plate_candidates(self, text: str) -> list[str]:
@@ -42,19 +44,27 @@ class PlateReader:
                 interpolation=cv2.INTER_CUBIC,
             )
 
+        gray = cv2.bilateralFilter(gray, 9, 75, 75)
+
         return gray
 
-    def read_plate_from_image(self, image_path: str | Path) -> dict:
-        image_path = Path(image_path)
-        image = cv2.imread(str(image_path))
-
+    def read_plate_from_image_array(self, image) -> dict:
         if image is None:
             return {
                 "plate_found": False,
                 "plate_text": None,
                 "confidence": 0.0,
                 "raw_results": [],
-                "error": f"Could not read image: {image_path}",
+                "error": "Image is None",
+            }
+
+        if image.size == 0:
+            return {
+                "plate_found": False,
+                "plate_text": None,
+                "confidence": 0.0,
+                "raw_results": [],
+                "error": "Image is empty",
             }
 
         processed = self.preprocess_image(image)
@@ -86,3 +96,21 @@ class PlateReader:
             "raw_results": raw_results,
             "error": None,
         }
+
+    def read_plate_from_image(self, image_path: str | Path) -> dict:
+        image_path = Path(image_path)
+        image = cv2.imread(str(image_path))
+
+        if image is None:
+            return {
+                "plate_found": False,
+                "plate_text": None,
+                "confidence": 0.0,
+                "raw_results": [],
+                "error": f"Could not read image: {image_path}",
+            }
+
+        result = self.read_plate_from_image_array(image)
+        result["image_path"] = str(image_path)
+
+        return result

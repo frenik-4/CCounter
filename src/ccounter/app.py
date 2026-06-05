@@ -2,6 +2,8 @@ import os
 import time
 from datetime import datetime
 from src.ccounter.plate_reader import PlateReader
+from src.ccounter.track_plate_manager import TrackPlateManager
+
 
 import cv2
 import numpy as np
@@ -348,12 +350,36 @@ def try_read_plate_from_snapshot(
         f"confidence={confidence:.2f}"
     )
 
+def update_plate_candidates(
+    frame,
+    tracked_objects: dict[int, dict],
+    track_plate_manager: TrackPlateManager | None,
+) -> None:
+    if track_plate_manager is None:
+        return
+
+    for object_id, obj in tracked_objects.items():
+        if obj.get("missing", 0) > 0:
+            continue
+
+        object_class = obj["class_name"]
+
+        if object_class not in ("car", "truck", "bus", "motorcycle"):
+            continue
+
+        track_plate_manager.update_track(
+            track_id=object_id,
+            frame=frame,
+            bbox=obj["bbox"],
+        )
+
 def handle_passages(
     db: Database,
     frame,
     tracked_objects: dict[int, dict],
     line_counter: MultiLineCounter,
     plate_reader: PlateReader | None = None,
+    track_plate_manager: TrackPlateManager | None = None,
 ) -> None:
     
     for object_id, obj in tracked_objects.items():
@@ -404,18 +430,42 @@ def handle_passages(
                 snapshot_path=snapshot_path,
             )
             
-            try_read_plate_from_snapshot(
+    best_plate = None
+
+    if track_plate_manager is not None:
+        best_plate = track_plate_manager.get_best_plate(object_id)
+
+    if best_plate is not None and best_plate.plate_text:
+        append_plate_log(
+            plate_text=best_plate.plate_text,
+            confidence=best_plate.confidence,
+            snapshot_path=snapshot_path or "",
+            object_class=obj["class_name"],
+            event_type=event_type,
+            line_name=line_name,
+            direction=direction,
+        )
+
+        print(
+            f"ANPR best plate saved: "
+            f"track_id={object_id} "
+            f"plate={best_plate.plate_text} "
+            f"confidence={best_plate.confidence:.2f}"
+        )
+
+    elif plate_reader is not None:
+        try_read_plate_from_snapshot(
             plate_reader=plate_reader,
             snapshot_path=snapshot_path,
             object_class=obj["class_name"],
             event_type=event_type,
             line_name=line_name,
             direction=direction,
-            )
+        )
 
-            total = db.count_events()
+        total = db.count_events()
 
-            print(
+        print(
                 "EVENT: "
                 f"id={object_id} | "
                 f"type={event_type} | "
@@ -427,7 +477,6 @@ def handle_passages(
                 f"total={total} | "
                 f"snapshot={snapshot_path}"
             )
-
 
 def reconnect(rtsp_url: str, delay_seconds: int = 5) -> cv2.VideoCapture:
     print(f"Tappade strommen. Forsoker ateransluta om {delay_seconds} sekunder...")
@@ -458,9 +507,15 @@ def main() -> None:
     print("YOLO-modell laddad.")
 
     plate_reader = None
+    track_plate_manager = None
 
     if PLATE_RECOGNITION_ENABLED:
         plate_reader = PlateReader()
+        track_plate_manager = TrackPlateManager(
+        plate_reader=plate_reader,
+        min_confidence=PLATE_MIN_CONFIDENCE,
+        check_interval_seconds=1.0,
+    )
 
     db = Database(DATABASE_PATH)
 
@@ -495,12 +550,19 @@ def main() -> None:
             detections = detect_vehicles(model, frame)
             tracked_objects = tracker.update(detections)
 
+            update_plate_candidates(
+            frame=frame,
+            tracked_objects=tracked_objects,
+            track_plate_manager=track_plate_manager,
+            )
+
             handle_passages(
-                db=db,
-                frame=frame,
-                tracked_objects=tracked_objects,
-                line_counter=line_counter,
-                plate_reader=plate_reader,
+            db=db,
+            frame=frame,
+            tracked_objects=tracked_objects,
+            line_counter=line_counter,
+            plate_reader=plate_reader,
+            track_plate_manager=track_plate_manager,
             )
 
             if frame_count % 150 == 0:
