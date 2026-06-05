@@ -1,0 +1,882 @@
+{
+  "generated_at": "2026-06-05 22:37:04",
+  "available_dates": [
+    "2026-06-03",
+    "2026-06-04",
+    "2026-06-05"
+  ],
+  "days": {
+    "2026-06-03": {
+      "total": 7,
+      "road_traffic": 7,
+      "other": 0,
+      "categories": {
+        "road_traffic": 7
+      },
+      "hours": [
+        {
+          "hour": "09:00-10:00",
+          "road_traffic": 1,
+          "other": 0,
+          "total": 1,
+          "events": [
+            {
+              "time": "09:06:46",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "left_to_right"
+            }
+          ]
+        },
+        {
+          "hour": "20:00-21:00",
+          "road_traffic": 1,
+          "other": 0,
+          "total": 1,
+          "events": [
+            {
+              "time": "20:56:12",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            }
+          ]
+        },
+        {
+          "hour": "21:00-22:00",
+          "road_traffic": 5,
+          "other": 0,
+          "total": 5,
+          "events": [
+            {
+              "time": "21:08:01",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "21:24:44",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "21:30:27",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "21:36:52",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "21:38:26",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            }
+          ]
+        }
+      ]
+    },
+    "2026-06-04": {
+      "total": 87,
+      "road_traffic": 77,
+      "other": 10,
+      "categories": {
+        "road_traffic": 77,
+        "pedestrian": 5,
+        "bicycle": 5
+      },
+      "hours": [
+        {
+          "hour": "03:00-04:00",
+          "road_traffic": 1,
+          "other": 0,
+          "total": 1,
+          "events": [
+            {
+              "time": "03:37:53",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            }
+          ]
+        },
+        {
+          "hour": "06:00-07:00",
+          "road_traffic": 4,
+          "other": 4,
+          "total": 8,
+          "events": [
+            {
+              "time": "06:09:29",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "06:25:14",
+              "event_type": "road_passage",
+              "category": "pedestrian",
+              "object_class": "person",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "06:25:14",
+              "event_type": "road_passage",
+              "category": "bicycle",
+              "object_class": "bicycle",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "06:30:15",
+              "event_type": "road_passage",
+              "category": "bicycle",
+              "object_class": "bicycle",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "06:30:15",
+              "event_type": "road_passage",
+              "category": "pedestrian",
+              "object_class": "person",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "06:35:53",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "06:54:39",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "06:59:36",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            }
+          ]
+        },
+        {
+          "hour": "07:00-08:00",
+          "road_traffic": 11,
+          "other": 0,
+          "total": 11,
+          "events": [
+            {
+              "time": "07:01:08",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "truck",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "07:07:09",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "07:07:48",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "truck",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "07:09:42",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "truck",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "07:09:50",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "07:12:48",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "07:15:50",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "truck",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "07:17:45",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "truck",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "07:25:19",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "07:32:45",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "07:55:03",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            }
+          ]
+        },
+        {
+          "hour": "08:00-09:00",
+          "road_traffic": 2,
+          "other": 0,
+          "total": 2,
+          "events": [
+            {
+              "time": "08:10:04",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "08:17:35",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            }
+          ]
+        },
+        {
+          "hour": "09:00-10:00",
+          "road_traffic": 1,
+          "other": 0,
+          "total": 1,
+          "events": [
+            {
+              "time": "09:24:35",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            }
+          ]
+        },
+        {
+          "hour": "10:00-11:00",
+          "road_traffic": 4,
+          "other": 0,
+          "total": 4,
+          "events": [
+            {
+              "time": "10:10:52",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "10:31:29",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "motorcycle",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "10:31:35",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "motorcycle",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "10:38:39",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            }
+          ]
+        },
+        {
+          "hour": "11:00-12:00",
+          "road_traffic": 2,
+          "other": 2,
+          "total": 4,
+          "events": [
+            {
+              "time": "11:30:52",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "11:33:38",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "11:37:55",
+              "event_type": "road_passage",
+              "category": "pedestrian",
+              "object_class": "person",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "11:37:55",
+              "event_type": "road_passage",
+              "category": "bicycle",
+              "object_class": "bicycle",
+              "direction": "B_TO_A"
+            }
+          ]
+        },
+        {
+          "hour": "12:00-13:00",
+          "road_traffic": 5,
+          "other": 0,
+          "total": 5,
+          "events": [
+            {
+              "time": "12:05:17",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "12:25:48",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "truck",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "12:39:15",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "truck",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "12:50:35",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "12:59:20",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            }
+          ]
+        },
+        {
+          "hour": "13:00-14:00",
+          "road_traffic": 2,
+          "other": 0,
+          "total": 2,
+          "events": [
+            {
+              "time": "13:21:23",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "13:38:57",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            }
+          ]
+        },
+        {
+          "hour": "14:00-15:00",
+          "road_traffic": 1,
+          "other": 0,
+          "total": 1,
+          "events": [
+            {
+              "time": "14:40:34",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            }
+          ]
+        },
+        {
+          "hour": "15:00-16:00",
+          "road_traffic": 5,
+          "other": 0,
+          "total": 5,
+          "events": [
+            {
+              "time": "15:10:50",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "15:21:43",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "15:45:38",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "15:47:34",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "15:50:04",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            }
+          ]
+        },
+        {
+          "hour": "16:00-17:00",
+          "road_traffic": 5,
+          "other": 1,
+          "total": 6,
+          "events": [
+            {
+              "time": "16:02:55",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "16:06:28",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "16:17:26",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "16:23:46",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "16:55:40",
+              "event_type": "road_passage",
+              "category": "bicycle",
+              "object_class": "bicycle",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "16:59:45",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            }
+          ]
+        },
+        {
+          "hour": "17:00-18:00",
+          "road_traffic": 19,
+          "other": 0,
+          "total": 19,
+          "events": [
+            {
+              "time": "17:00:38",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "truck",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:00:41",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "truck",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:05:06",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:05:30",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:08:14",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:11:11",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:11:15",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:15:30",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "17:17:10",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "17:22:27",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:26:19",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "17:38:10",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:43:06",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:43:15",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:49:33",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:49:50",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:52:20",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:53:59",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "17:56:01",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            }
+          ]
+        },
+        {
+          "hour": "18:00-19:00",
+          "road_traffic": 11,
+          "other": 0,
+          "total": 11,
+          "events": [
+            {
+              "time": "18:01:54",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "18:06:12",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "18:06:45",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "18:06:46",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "18:09:14",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "18:13:17",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "18:15:33",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "18:34:19",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "18:39:18",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "18:45:01",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            },
+            {
+              "time": "18:55:33",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            }
+          ]
+        },
+        {
+          "hour": "19:00-20:00",
+          "road_traffic": 0,
+          "other": 1,
+          "total": 1,
+          "events": [
+            {
+              "time": "19:56:27",
+              "event_type": "road_passage",
+              "category": "pedestrian",
+              "object_class": "person",
+              "direction": "A_TO_B"
+            }
+          ]
+        },
+        {
+          "hour": "20:00-21:00",
+          "road_traffic": 4,
+          "other": 2,
+          "total": 6,
+          "events": [
+            {
+              "time": "20:09:19",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "20:09:55",
+              "event_type": "road_passage",
+              "category": "pedestrian",
+              "object_class": "person",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "20:09:55",
+              "event_type": "road_passage",
+              "category": "bicycle",
+              "object_class": "bicycle",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "20:41:57",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "20:47:10",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            },
+            {
+              "time": "20:47:57",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "A_TO_B"
+            }
+          ]
+        }
+      ]
+    },
+    "2026-06-05": {
+      "total": 2,
+      "road_traffic": 2,
+      "other": 0,
+      "categories": {
+        "road_traffic": 2
+      },
+      "hours": [
+        {
+          "hour": "21:00-22:00",
+          "road_traffic": 1,
+          "other": 0,
+          "total": 1,
+          "events": [
+            {
+              "time": "21:25:06",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "truck",
+              "direction": "B_TO_A"
+            }
+          ]
+        },
+        {
+          "hour": "22:00-23:00",
+          "road_traffic": 1,
+          "other": 0,
+          "total": 1,
+          "events": [
+            {
+              "time": "22:03:22",
+              "event_type": "road_passage",
+              "category": "road_traffic",
+              "object_class": "car",
+              "direction": "B_TO_A"
+            }
+          ]
+        }
+      ]
+    }
+  }
+}

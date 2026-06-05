@@ -1,0 +1,88 @@
+import re
+from pathlib import Path
+
+import cv2
+import easyocr
+
+
+PLATE_PATTERN = re.compile(r"[A-Z]{3}[0-9]{2}[A-Z0-9]")
+
+
+class PlateReader:
+    def __init__(self):
+        print("Loading EasyOCR...")
+        self.reader = easyocr.Reader(["en"], gpu=False)
+        print("EasyOCR loaded.")
+
+    def clean_text(self, text: str) -> str:
+        text = text.upper()
+        text = text.replace(" ", "")
+        text = text.replace("-", "")
+        text = text.replace(".", "")
+        text = text.replace(":", "")
+        text = text.replace("_", "")
+        return text
+
+    def extract_plate_candidates(self, text: str) -> list[str]:
+        cleaned = self.clean_text(text)
+        return PLATE_PATTERN.findall(cleaned)
+
+    def preprocess_image(self, image):
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+
+        height, width = gray.shape[:2]
+
+        if width < 1000:
+            scale = 1000 / width
+            gray = cv2.resize(
+                gray,
+                None,
+                fx=scale,
+                fy=scale,
+                interpolation=cv2.INTER_CUBIC,
+            )
+
+        return gray
+
+    def read_plate_from_image(self, image_path: str | Path) -> dict:
+        image_path = Path(image_path)
+        image = cv2.imread(str(image_path))
+
+        if image is None:
+            return {
+                "plate_found": False,
+                "plate_text": None,
+                "confidence": 0.0,
+                "raw_results": [],
+                "error": f"Could not read image: {image_path}",
+            }
+
+        processed = self.preprocess_image(image)
+        results = self.reader.readtext(processed)
+
+        best_plate = None
+        best_confidence = 0.0
+        raw_results = []
+
+        for _bbox, text, confidence in results:
+            raw_results.append(
+                {
+                    "text": text,
+                    "confidence": float(confidence),
+                }
+            )
+
+            candidates = self.extract_plate_candidates(text)
+
+            for candidate in candidates:
+                if confidence > best_confidence:
+                    best_plate = candidate
+                    best_confidence = float(confidence)
+
+        return {
+            "plate_found": best_plate is not None,
+            "plate_text": best_plate,
+            "confidence": best_confidence,
+            "raw_results": raw_results,
+            "error": None,
+        }

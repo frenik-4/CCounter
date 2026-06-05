@@ -1,0 +1,711 @@
+<!doctype html>
+<html lang="sv">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>CCounter Trafikstatistik</title>
+
+  <style>
+    :root {
+      --bg: #0f172a;
+      --card: #111827;
+      --card-soft: #1f2937;
+      --text: #e5e7eb;
+      --muted: #9ca3af;
+      --accent: #38bdf8;
+      --green: #22c55e;
+      --border: rgba(255, 255, 255, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      font-family: Arial, sans-serif;
+      background: radial-gradient(circle at top, #1e293b 0, var(--bg) 45%);
+      color: var(--text);
+    }
+
+    .page {
+      max-width: 1150px;
+      margin: 0 auto;
+      padding: 32px 18px;
+    }
+
+    header {
+      display: flex;
+      justify-content: space-between;
+      gap: 16px;
+      align-items: flex-start;
+      margin-bottom: 24px;
+    }
+
+    h1 {
+      margin: 0;
+      font-size: 32px;
+      letter-spacing: -0.03em;
+    }
+
+    .subtitle {
+      margin-top: 8px;
+      color: var(--muted);
+    }
+
+    .status {
+      background: rgba(34, 197, 94, 0.12);
+      border: 1px solid rgba(34, 197, 94, 0.35);
+      color: #bbf7d0;
+      border-radius: 999px;
+      padding: 8px 12px;
+      font-size: 14px;
+      white-space: nowrap;
+    }
+
+    .toolbar {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
+      margin-bottom: 18px;
+    }
+
+    .select-wrap {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      color: var(--muted);
+    }
+
+    select {
+      background: var(--card);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 10px 12px;
+      font-size: 15px;
+    }
+
+    .grid {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 14px;
+      margin-bottom: 18px;
+    }
+
+    .card {
+      background: rgba(17, 24, 39, 0.88);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      padding: 18px;
+      box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+    }
+
+    .metric-label {
+      color: var(--muted);
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .metric-value {
+      font-size: 34px;
+      font-weight: 700;
+      line-height: 1;
+    }
+
+    .metric-note {
+      margin-top: 8px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .section {
+      margin-top: 18px;
+    }
+
+    .section h2 {
+      margin: 0 0 12px;
+      font-size: 20px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 140px 1fr 50px;
+      gap: 12px;
+      align-items: center;
+      margin: 10px 0;
+    }
+
+    .bar-bg {
+      background: var(--card-soft);
+      height: 12px;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .bar {
+      height: 100%;
+      background: linear-gradient(90deg, var(--accent), var(--green));
+      border-radius: 999px;
+      width: 0%;
+    }
+
+    .hour-list {
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .hour-card {
+      background: rgba(31, 41, 55, 0.62);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      overflow: hidden;
+    }
+
+    .hour-header {
+      width: 100%;
+      border: 0;
+      background: transparent;
+      color: var(--text);
+      cursor: pointer;
+      padding: 14px;
+      display: grid;
+      grid-template-columns: 150px repeat(3, 1fr) 28px;
+      gap: 10px;
+      align-items: center;
+      text-align: left;
+      font-size: 14px;
+    }
+
+    .hour-header:hover {
+      background: rgba(255, 255, 255, 0.04);
+    }
+
+    .hour-time {
+      font-weight: 700;
+    }
+
+    .hour-stat {
+      color: var(--muted);
+    }
+
+    .chevron {
+      text-align: right;
+      font-size: 18px;
+      color: var(--accent);
+    }
+
+    .event-list {
+      display: none;
+      border-top: 1px solid var(--border);
+      padding: 0;
+    }
+
+    .hour-card.open .event-list {
+      display: block;
+    }
+
+    .event-row {
+      display: grid;
+      grid-template-columns: 95px 130px 140px 120px 90px;
+      gap: 10px;
+      padding: 11px 14px;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+      color: var(--text);
+    }
+
+    .event-row:last-child {
+      border-bottom: 0;
+    }
+
+    .event-head {
+      color: var(--muted);
+      background: rgba(255, 255, 255, 0.03);
+      font-weight: 600;
+    }
+
+    .pill {
+      display: inline-block;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: rgba(56, 189, 248, 0.12);
+      color: #bae6fd;
+      border: 1px solid rgba(56, 189, 248, 0.22);
+      font-size: 12px;
+      width: fit-content;
+    }
+
+    .empty {
+      color: var(--muted);
+      padding: 12px 0;
+    }
+
+    .chart-wrap {
+      overflow-x: auto;
+      padding-top: 8px;
+    }
+
+    .hour-chart {
+      min-width: 720px;
+      height: 260px;
+      display: grid;
+      grid-template-columns: repeat(24, 1fr);
+      gap: 8px;
+      align-items: end;
+      border-left: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 8px 28px 8px;
+      position: relative;
+    }
+
+    .chart-bar-wrap {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 6px;
+      position: relative;
+    }
+
+    .chart-bar {
+      width: 100%;
+      max-width: 28px;
+      min-height: 2px;
+      border-radius: 8px 8px 0 0;
+      background: linear-gradient(180deg, var(--accent), var(--green));
+    }
+
+    .chart-value {
+      font-size: 12px;
+      color: var(--text);
+      min-height: 14px;
+    }
+
+    .chart-hour {
+      position: absolute;
+      bottom: -22px;
+      font-size: 11px;
+      color: var(--muted);
+    }
+
+    .chart-empty {
+      color: var(--muted);
+      padding: 12px 0;
+    }
+
+    .footer {
+      margin-top: 28px;
+      color: var(--muted);
+      font-size: 13px;
+      text-align: center;
+    }
+
+    @media (max-width: 900px) {
+      header,
+      .toolbar {
+        display: block;
+      }
+
+      .status {
+        display: inline-block;
+        margin-top: 14px;
+      }
+
+      .select-wrap {
+        margin-top: 12px;
+      }
+
+      .grid {
+        grid-template-columns: repeat(2, 1fr);
+      }
+
+      .hour-header {
+        grid-template-columns: 1fr 28px;
+      }
+
+      .hour-stat {
+        display: none;
+      }
+
+      .event-row {
+        grid-template-columns: 1fr;
+        gap: 4px;
+      }
+
+      .event-head {
+        display: none;
+      }
+    }
+
+    @media (max-width: 520px) {
+      .grid {
+        grid-template-columns: 1fr;
+      }
+
+      h1 {
+        font-size: 26px;
+      }
+
+      .bar-row {
+        grid-template-columns: 110px 1fr 40px;
+      }
+    }
+  </style>
+</head>
+
+<body>
+  <main class="page">
+    <header>
+      <div>
+        <h1>CCounter Trafikstatistik</h1>
+        <div class="subtitle">Sammanställd trafikdata från lokal kameraanalys</div>
+      </div>
+
+      <div class="status" id="status">Laddar data...</div>
+    </header>
+
+    <div class="toolbar">
+      <div class="select-wrap">
+        <label for="dateSelect">Välj dag:</label>
+        <select id="dateSelect"></select>
+      </div>
+    </div>
+
+    <section class="grid">
+      <div class="card">
+        <div class="metric-label">Totalt vald dag</div>
+        <div class="metric-value" id="totalDay">–</div>
+        <div class="metric-note">Publika vägrelaterade händelser</div>
+      </div>
+
+      <div class="card">
+        <div class="metric-label">Vägtrafik</div>
+        <div class="metric-value" id="roadTraffic">–</div>
+        <div class="metric-note">Passager på vägen</div>
+      </div>
+
+      <div class="card">
+        <div class="metric-label">Övrigt</div>
+        <div class="metric-value" id="otherTraffic">–</div>
+        <div class="metric-note">Personer, cyklar, djur m.m.</div>
+      </div>
+
+      <div class="card">
+        <div class="metric-label">Vald dag</div>
+        <div class="metric-value" id="selectedDayLabel">–</div>
+        <div class="metric-note">Aktivt datum</div>
+      </div>
+    </section>
+
+    <section class="card section">
+      <h2>Kategorier</h2>
+      <div id="categoryBars"></div>
+    </section>
+
+    <section class="card section">
+      <h2>Timmar och händelser</h2>
+      <div id="hourList" class="hour-list"></div>
+    </section>
+
+    <section class="card section">
+      <h2>Dygnsgraf</h2>
+      <div class="chart-wrap">
+        <div id="hourChart" class="hour-chart"></div>
+      </div>
+    </section>
+
+    <div class="footer">
+      ***
+    </div>
+  </main>
+
+  <script>
+    let allStats = null;
+
+    async function loadStats() {
+      const response = await fetch("stats.json?cache=" + Date.now());
+
+      if (!response.ok) {
+        throw new Error("Kunde inte läsa stats.json");
+      }
+
+      return response.json();
+    }
+
+    function setText(id, value) {
+      document.getElementById(id).textContent = value;
+    }
+
+    function translateDirection(direction) {
+      if (direction === "A_TO_B") {
+        return "Norrut";
+      }
+
+      if (direction === "B_TO_A") {
+        return "Söderut";
+      }
+
+      return direction || "";
+    }
+
+    function isParkingEvent(event) {
+      return (
+        event.event_type === "parking_entry" ||
+        event.event_type === "parking_exit" ||
+        event.category === "parking_traffic"
+      );
+    }
+
+    function setupDateSelect(stats) {
+      const select = document.getElementById("dateSelect");
+      select.innerHTML = "";
+
+      const dates = stats.available_dates || Object.keys(stats.days || {}).sort().reverse();
+
+      for (const date of dates) {
+        const option = document.createElement("option");
+        option.value = date;
+        option.textContent = date;
+        select.appendChild(option);
+      }
+
+      if (dates.length > 0) {
+        select.value = dates[dates.length - 1];
+      }
+
+      select.addEventListener("change", () => {
+        renderDay(select.value);
+      });
+    }
+
+    function renderCategoryBars(categories) {
+      const container = document.getElementById("categoryBars");
+      container.innerHTML = "";
+
+      const filteredCategories = { ...categories };
+      delete filteredCategories.parking_traffic;
+
+      const entries = Object.entries(filteredCategories || {});
+      const max = Math.max(...entries.map(([, count]) => count), 1);
+
+      if (entries.length === 0) {
+        container.innerHTML = `<div class="empty">Ingen kategoridata för vald dag.</div>`;
+        return;
+      }
+
+      for (const [name, count] of entries) {
+        const percent = Math.round((count / max) * 100);
+
+        const row = document.createElement("div");
+        row.className = "bar-row";
+
+        row.innerHTML = `
+          <div>${name}</div>
+          <div class="bar-bg">
+            <div class="bar" style="width: ${percent}%"></div>
+          </div>
+          <div>${count}</div>
+        `;
+
+        container.appendChild(row);
+      }
+    }
+
+    function renderHourList(hours) {
+      const container = document.getElementById("hourList");
+      container.innerHTML = "";
+
+      if (!hours || hours.length === 0) {
+        container.innerHTML = `<div class="empty">Ingen timdata för vald dag.</div>`;
+        return;
+      }
+
+      for (const hour of hours) {
+        const visibleEvents = (hour.events || []).filter(event => !isParkingEvent(event));
+
+        const roadTraffic = hour.road_traffic || 0;
+        const other = hour.other || 0;
+        const total = roadTraffic + other;
+
+        if (total === 0 && visibleEvents.length === 0) {
+          continue;
+        }
+
+        const card = document.createElement("div");
+        card.className = "hour-card";
+
+        const button = document.createElement("button");
+        button.className = "hour-header";
+
+        button.innerHTML = `
+          <div class="hour-time">${hour.hour}</div>
+          <div class="hour-stat">Väg: ${roadTraffic}</div>
+          <div class="hour-stat">Övrigt: ${other}</div>
+          <div class="hour-stat">Totalt: ${total}</div>
+          <div class="chevron">+</div>
+        `;
+
+        const eventList = document.createElement("div");
+        eventList.className = "event-list";
+
+        if (visibleEvents.length === 0) {
+          eventList.innerHTML = `<div class="event-row"><div>Inga events i denna timme.</div></div>`;
+        } else {
+          eventList.innerHTML = `
+            <div class="event-row event-head">
+              <div>Tid</div>
+              <div>Typ</div>
+              <div>Kategori</div>
+              <div>Objekt</div>
+              <div>Riktning</div>
+            </div>
+          `;
+
+          for (const event of visibleEvents) {
+            const row = document.createElement("div");
+            row.className = "event-row";
+
+            row.innerHTML = `
+              <div>${event.time || ""}</div>
+              <div><span class="pill">${event.event_type || ""}</span></div>
+              <div>${event.category || ""}</div>
+              <div>${event.object_class || ""}</div>
+              <div>${translateDirection(event.direction)}</div>
+            `;
+
+            eventList.appendChild(row);
+          }
+        }
+
+        button.addEventListener("click", () => {
+          const isOpen = card.classList.toggle("open");
+          button.querySelector(".chevron").textContent = isOpen ? "−" : "+";
+        });
+
+        card.appendChild(button);
+        card.appendChild(eventList);
+        container.appendChild(card);
+      }
+
+      if (container.innerHTML === "") {
+        container.innerHTML = `<div class="empty">Ingen vägtrafik för vald dag.</div>`;
+      }
+    }
+
+    function parseHourStart(hourLabel) {
+      if (!hourLabel) {
+        return null;
+      }
+
+      const start = hourLabel.split("-")[0];
+      const hour = parseInt(start.split(":")[0], 10);
+
+      if (Number.isNaN(hour)) {
+        return null;
+      }
+
+      return hour;
+    }
+
+    function renderHourChart(hours) {
+      const container = document.getElementById("hourChart");
+      container.innerHTML = "";
+
+      const countsByHour = {};
+
+      for (let i = 0; i < 24; i++) {
+        countsByHour[i] = 0;
+      }
+
+      for (const hour of hours || []) {
+        const hourNumber = parseHourStart(hour.hour);
+
+        if (hourNumber === null) {
+          continue;
+        }
+
+        const roadTraffic = hour.road_traffic || 0;
+        const other = hour.other || 0;
+
+        countsByHour[hourNumber] = roadTraffic + other;
+      }
+
+      const max = Math.max(...Object.values(countsByHour), 1);
+      const total = Object.values(countsByHour).reduce((sum, value) => sum + value, 0);
+
+      if (total === 0) {
+        container.innerHTML = `<div class="chart-empty">Ingen data för vald dag.</div>`;
+        return;
+      }
+
+      for (let i = 0; i < 24; i++) {
+        const count = countsByHour[i];
+        const percent = Math.max((count / max) * 100, count > 0 ? 4 : 0);
+        const hourLabel = String(i).padStart(2, "0");
+
+        const wrap = document.createElement("div");
+        wrap.className = "chart-bar-wrap";
+
+        wrap.innerHTML = `
+          <div class="chart-value">${count > 0 ? count : ""}</div>
+          <div class="chart-bar" style="height: ${percent}%"></div>
+          <div class="chart-hour">${hourLabel}</div>
+        `;
+
+        container.appendChild(wrap);
+      }
+    }
+
+    function renderDay(date) {
+      const day = allStats.days?.[date];
+
+      if (!day) {
+        setText("totalDay", 0);
+        setText("roadTraffic", 0);
+        setText("otherTraffic", 0);
+        setText("selectedDayLabel", "–");
+        renderCategoryBars({});
+        renderHourList([]);
+        renderHourChart([]);
+        return;
+      }
+
+      const roadTraffic = day.road_traffic || 0;
+      const other = day.other || 0;
+      const totalWithoutParking = roadTraffic + other;
+
+      setText("totalDay", totalWithoutParking);
+      setText("roadTraffic", roadTraffic);
+      setText("otherTraffic", other);
+      setText("selectedDayLabel", date);
+
+      renderCategoryBars(day.categories || {});
+      renderHourList(day.hours || []);
+      renderHourChart(day.hours || []);
+    }
+
+    async function main() {
+      try {
+        allStats = await loadStats();
+
+        setupDateSelect(allStats);
+
+        const select = document.getElementById("dateSelect");
+        renderDay(select.value);
+
+        document.getElementById("status").textContent =
+          "Uppdaterad: " + (allStats.generated_at || "okänd tid");
+      } catch (error) {
+        document.getElementById("status").textContent = "Kunde inte läsa statistik";
+        console.error(error);
+      }
+    }
+
+    main();
+  </script>
+</body>
+</html>

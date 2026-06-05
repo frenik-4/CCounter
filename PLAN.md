@@ -86,6 +86,31 @@ Planned server:
 8. Later: add license plate recognition locally only.
 9. Later: export aggregated stats to external website.
 
+## Planned ANPR improvement
+
+Current ANPR test:
+
+- ANPR runs only when an event snapshot is saved.
+- This means OCR is attempted at the line crossing moment only.
+- Results are written temporarily to `data/plates_found.txt`.
+
+Planned improved ANPR flow:
+
+- Track each vehicle while it is visible.
+- Keep best candidate image per track ID.
+- Run ANPR periodically, not every frame.
+- Run ANPR on vehicle crop instead of full snapshot.
+- Store best plate result per track:
+  - plate text
+  - OCR confidence
+  - snapshot/crop path
+  - timestamp
+- When the vehicle crosses a count line:
+  - save the event
+  - attach the best plate result found during the whole track
+  - later store this in the local database
+- License plates must remain local only and must never be included in public exports.
+
 ## Important design decisions
 
 - SQLite is the local source of truth.

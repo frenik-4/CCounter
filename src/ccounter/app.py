@@ -1,6 +1,7 @@
 import os
 import time
 from datetime import datetime
+from src.ccounter.plate_reader import PlateReader
 
 import cv2
 import numpy as np
@@ -24,6 +25,10 @@ from src.ccounter.config import (
     DRAW_LINES,
     TRACKER_MAX_DISTANCE,
     TRACKER_MAX_MISSING_FRAMES,
+    DISPLAY_SCALE,
+    PLATE_RECOGNITION_ENABLED,
+    PLATE_LOG_PATH,
+    PLATE_MIN_CONFIDENCE,
 )
 from src.ccounter.database import Database
 from src.ccounter.tracker import CentroidTracker
@@ -267,12 +272,90 @@ def get_event_type(line_name: str) -> str:
 
     return "road_passage"
 
+def append_plate_log(
+    plate_text: str,
+    confidence: float,
+    snapshot_path: str,
+    object_class: str,
+    event_type: str,
+    line_name: str,
+    direction: str,
+) -> None:
+    folder = os.path.dirname(PLATE_LOG_PATH)
+
+    if folder:
+        os.makedirs(folder, exist_ok=True)
+
+    timestamp = datetime.now().isoformat(timespec="seconds")
+
+    line = (
+        f"{timestamp} | "
+        f"plate={plate_text} | "
+        f"confidence={confidence:.2f} | "
+        f"class={object_class} | "
+        f"event_type={event_type} | "
+        f"line={line_name} | "
+        f"direction={direction} | "
+        f"snapshot={snapshot_path}"
+    )
+
+    with open(PLATE_LOG_PATH, "a", encoding="utf-8") as file:
+        file.write(line + "\n")
+
+
+def try_read_plate_from_snapshot(
+    plate_reader: PlateReader | None,
+    snapshot_path: str | None,
+    object_class: str,
+    event_type: str,
+    line_name: str,
+    direction: str,
+) -> None:
+    if plate_reader is None:
+        return
+
+    if not snapshot_path:
+        return
+
+    result = plate_reader.read_plate_from_image(snapshot_path)
+
+    if not result["plate_found"]:
+        print("ANPR: inget regnummer hittat.")
+        return
+
+    plate_text = result["plate_text"]
+    confidence = result["confidence"]
+
+    if confidence < PLATE_MIN_CONFIDENCE:
+        print(
+            f"ANPR: hittade {plate_text}, men confidence var låg: "
+            f"{confidence:.2f}"
+        )
+        return
+
+    append_plate_log(
+        plate_text=plate_text,
+        confidence=confidence,
+        snapshot_path=snapshot_path,
+        object_class=object_class,
+        event_type=event_type,
+        line_name=line_name,
+        direction=direction,
+    )
+
+    print(
+        f"ANPR: regnummer sparat: {plate_text} "
+        f"confidence={confidence:.2f}"
+    )
+
 def handle_passages(
     db: Database,
     frame,
     tracked_objects: dict[int, dict],
     line_counter: MultiLineCounter,
+    plate_reader: PlateReader | None = None,
 ) -> None:
+    
     for object_id, obj in tracked_objects.items():
         if obj.get("missing", 0) > 0:
             continue
@@ -320,6 +403,15 @@ def handle_passages(
                 center=obj["center"],
                 snapshot_path=snapshot_path,
             )
+            
+            try_read_plate_from_snapshot(
+            plate_reader=plate_reader,
+            snapshot_path=snapshot_path,
+            object_class=obj["class_name"],
+            event_type=event_type,
+            line_name=line_name,
+            direction=direction,
+            )
 
             total = db.count_events()
 
@@ -342,6 +434,17 @@ def reconnect(rtsp_url: str, delay_seconds: int = 5) -> cv2.VideoCapture:
     time.sleep(delay_seconds)
     return open_stream(rtsp_url)
 
+def resize_for_display(frame):
+    if DISPLAY_SCALE == 1:
+        return frame
+
+    height, width = frame.shape[:2]
+
+    new_width = int(width * DISPLAY_SCALE)
+    new_height = int(height * DISPLAY_SCALE)
+
+    return cv2.resize(frame, (new_width, new_height))
+
 
 def main() -> None:
     print("Startar CCounter med YOLO, tracking och flera linjer...")
@@ -353,6 +456,11 @@ def main() -> None:
 
     model = YOLO(YOLO_MODEL)
     print("YOLO-modell laddad.")
+
+    plate_reader = None
+
+    if PLATE_RECOGNITION_ENABLED:
+        plate_reader = PlateReader()
 
     db = Database(DATABASE_PATH)
 
@@ -392,6 +500,7 @@ def main() -> None:
                 frame=frame,
                 tracked_objects=tracked_objects,
                 line_counter=line_counter,
+                plate_reader=plate_reader,
             )
 
             if frame_count % 150 == 0:
@@ -427,7 +536,8 @@ def main() -> None:
                     2,
                 )
 
-                cv2.imshow("CCounter - Tracking and multi-line counting", frame)
+                display_frame = resize_for_display(frame)
+                cv2.imshow("CCounter - Tracking and multi-line counting", display_frame)
 
                 key = cv2.waitKey(1) & 0xFF
                 if key == ord("q"):

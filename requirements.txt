@@ -2,3 +2,5 @@ opencv-python
 ultralytics
 python-dotenv
 numpy
+paramiko
+easyocr
