@@ -1,6 +1,5 @@
 import json
 import os
-from collections import defaultdict
 from datetime import datetime
 
 from src.ccounter.config import DATABASE_PATH
@@ -10,67 +9,38 @@ from src.ccounter.database import Database
 OUTPUT_PATH = "public/stats.json"
 
 
-def translate_hour(timestamp: str) -> tuple[str, str, str]:
-    """
-    Returnerar:
-    date = 2026-06-03
-    hour_key = 2026-06-03 08:00:00
-    hour_label = 08:00-09:00
-    """
-
-    dt = datetime.fromisoformat(timestamp)
-
-    date = dt.strftime("%Y-%m-%d")
-    hour_key = dt.strftime("%Y-%m-%d %H:00:00")
-    hour_start = dt.strftime("%H:00")
-    hour_end = dt.replace(hour=dt.hour + 1).strftime("%H:00") if dt.hour < 23 else "00:00"
-
-    return date, hour_key, f"{hour_start}-{hour_end}"
-
-
-def is_public_event(row) -> bool:
-    if row["excluded_from_public_stats"]:
-        return False
-
-    # Tillfälligt: publicera inte parking i publika dashboarden
-    if row["event_type"] in ("parking_entry", "parking_exit"):
-        return False
-
-    if row["final_category"] == "parking_traffic":
-        return False
-
-    return True
-
-
 def main() -> None:
     db = Database(DATABASE_PATH)
 
+    # --- Pass 1: aggregated totals per hour/category ---
     cursor = db.conn.execute(
         """
         SELECT
-            timestamp,
-            event_type,
-            object_class,
-            final_category,
-            direction,
-            line_name,
-            confidence,
-            excluded_from_public_stats
+            strftime('%Y-%m-%d', timestamp) AS date,
+            strftime('%Y-%m-%d %H:00:00', timestamp) AS hour_key,
+            CAST(strftime('%H', timestamp) AS INTEGER) AS hour_num,
+            COALESCE(final_category, object_class, 'unknown') AS category,
+            COUNT(*) AS count
         FROM events
-        ORDER BY timestamp ASC;
+        WHERE excluded_from_public_stats = 0
+          AND event_type NOT IN ('parking_entry', 'parking_exit')
+          AND (final_category IS NULL OR final_category != 'parking_traffic')
+          AND (object_class IS NULL OR object_class != 'person')
+        GROUP BY date, hour_key, category
+        ORDER BY date, hour_key, category;
         """
     )
 
-    rows = cursor.fetchall()
+    days: dict[str, dict] = {}
+    available_dates: set[str] = set()
 
-    days = {}
-    available_dates = set()
+    for row in cursor:
+        date = row["date"]
+        hour_key = row["hour_key"]
+        hour_num = row["hour_num"]
+        category = row["category"]
+        count = row["count"]
 
-    for row in rows:
-        if not is_public_event(row):
-            continue
-
-        date, hour_key, hour_label = translate_hour(row["timestamp"])
         available_dates.add(date)
 
         if date not in days:
@@ -78,66 +48,85 @@ def main() -> None:
                 "total": 0,
                 "road_traffic": 0,
                 "other": 0,
-                "categories": defaultdict(int),
-                "hours_by_key": {},
+                "categories": {},
+                "hours": {},
             }
 
         day = days[date]
-
-        category = row["final_category"] or row["object_class"] or "unknown"
+        day["total"] += count
+        day["categories"][category] = day["categories"].get(category, 0) + count
 
         if category == "road_traffic":
-            day["road_traffic"] += 1
+            day["road_traffic"] += count
         else:
-            day["other"] += 1
+            day["other"] += count
 
-        day["total"] += 1
-        day["categories"][category] += 1
+        hour_end = (hour_num + 1) % 24
+        hour_label = f"{hour_num:02d}:00-{hour_end:02d}:00"
 
-        if hour_key not in day["hours_by_key"]:
-            day["hours_by_key"][hour_key] = {
+        if hour_key not in day["hours"]:
+            day["hours"][hour_key] = {
                 "hour": hour_label,
                 "road_traffic": 0,
                 "other": 0,
                 "total": 0,
+                "categories": {},
                 "events": [],
             }
 
-        hour = day["hours_by_key"][hour_key]
+        hour = day["hours"][hour_key]
+        hour["total"] += count
+        hour["categories"][category] = hour["categories"].get(category, 0) + count
 
         if category == "road_traffic":
-            hour["road_traffic"] += 1
+            hour["road_traffic"] += count
         else:
-            hour["other"] += 1
+            hour["other"] += count
 
-        hour["total"] += 1
+    # --- Pass 2: safe individual events per hour (no plates, no track IDs) ---
+    event_cursor = db.conn.execute(
+        """
+        SELECT
+            strftime('%Y-%m-%d', timestamp) AS date,
+            strftime('%Y-%m-%d %H:00:00', timestamp) AS hour_key,
+            strftime('%H:%M', timestamp) AS time,
+            event_type,
+            object_class,
+            COALESCE(final_category, object_class, 'unknown') AS category,
+            direction
+        FROM events
+        WHERE excluded_from_public_stats = 0
+          AND event_type NOT IN ('parking_entry', 'parking_exit')
+          AND (final_category IS NULL OR final_category != 'parking_traffic')
+          AND (object_class IS NULL OR object_class != 'person')
+        ORDER BY timestamp;
+        """
+    )
 
-        event_time = datetime.fromisoformat(row["timestamp"]).strftime("%H:%M:%S")
+    for row in event_cursor:
+        date = row["date"]
+        hour_key = row["hour_key"]
 
-        hour["events"].append(
-            {
-                "time": event_time,
-                "event_type": row["event_type"],
-                "category": category,
-                "object_class": row["object_class"],
-                "direction": row["direction"],
-            }
-        )
+        if date not in days or hour_key not in days[date]["hours"]:
+            continue
+
+        days[date]["hours"][hour_key]["events"].append({
+            "time": row["time"],
+            "event_type": row["event_type"],
+            "object_class": row["object_class"] or "",
+            "category": row["category"],
+            "direction": row["direction"] or "",
+        })
 
     output_days = {}
 
     for date, day in days.items():
-        hours = [
-            hour
-            for _, hour in sorted(day["hours_by_key"].items())
-        ]
-
         output_days[date] = {
             "total": day["total"],
             "road_traffic": day["road_traffic"],
             "other": day["other"],
-            "categories": dict(day["categories"]),
-            "hours": hours,
+            "categories": day["categories"],
+            "hours": [hour for _, hour in sorted(day["hours"].items())],
         }
 
     output = {

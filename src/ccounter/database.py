@@ -47,6 +47,8 @@ class Database:
                 plate_confidence REAL,
                 plate_group TEXT,
 
+                anpr_attempted INTEGER DEFAULT 0,
+
                 excluded_from_public_stats INTEGER DEFAULT 0,
                 excluded_reason TEXT,
 
@@ -56,6 +58,18 @@ class Database:
             );
             """
         )
+
+        # Migration: lägg till anpr_attempted om den saknas (befintliga databaser)
+        try:
+            self.conn.execute(
+                "ALTER TABLE events ADD COLUMN anpr_attempted INTEGER DEFAULT 0"
+            )
+            # Markera alla befintliga events som redan försökta — de har
+            # bearbetats i den första retroaktiva körningen.
+            self.conn.execute("UPDATE events SET anpr_attempted = 1")
+            self.conn.commit()
+        except Exception:
+            pass  # Kolumnen finns redan
 
         self.conn.execute(
             """
@@ -223,6 +237,46 @@ class Database:
             ),
         )
 
+        self.conn.commit()
+
+    def update_event_plate(
+        self,
+        event_id: int,
+        plate_text: str,
+        plate_confidence: float,
+    ) -> None:
+        self.conn.execute(
+            """
+            UPDATE events
+            SET plate_detected = 1,
+                plate_text = ?,
+                plate_confidence = ?,
+                anpr_attempted = 1
+            WHERE id = ?
+            """,
+            (plate_text, plate_confidence, event_id),
+        )
+        self.conn.commit()
+
+    def get_unprocessed_anpr_events(self) -> list:
+        cursor = self.conn.execute(
+            """
+            SELECT id, snapshot_path, bbox_x1, bbox_y1, bbox_x2, bbox_y2
+            FROM events
+            WHERE plate_detected = 0
+              AND anpr_attempted = 0
+              AND snapshot_path IS NOT NULL
+              AND snapshot_path != ''
+            ORDER BY timestamp
+            """
+        )
+        return cursor.fetchall()
+
+    def mark_anpr_attempted(self, event_id: int) -> None:
+        self.conn.execute(
+            "UPDATE events SET anpr_attempted = 1 WHERE id = ?",
+            (event_id,),
+        )
         self.conn.commit()
 
     def count_events(self) -> int:

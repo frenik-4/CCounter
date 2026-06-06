@@ -1,9 +1,6 @@
 import os
 import time
 from datetime import datetime
-from src.ccounter.plate_reader import PlateReader
-from src.ccounter.track_plate_manager import TrackPlateManager
-
 
 import cv2
 import numpy as np
@@ -28,9 +25,8 @@ from src.ccounter.config import (
     TRACKER_MAX_DISTANCE,
     TRACKER_MAX_MISSING_FRAMES,
     DISPLAY_SCALE,
-    PLATE_RECOGNITION_ENABLED,
-    PLATE_LOG_PATH,
-    PLATE_MIN_CONFIDENCE,
+    PROCESS_EVERY_N_FRAMES,
+    DETECTION_DEBUG,
 )
 from src.ccounter.database import Database
 from src.ccounter.tracker import CentroidTracker
@@ -78,28 +74,30 @@ def detect_vehicles(model: YOLO, frame) -> list[dict]:
         for box in result.boxes:
             class_id = int(box.cls[0])
             confidence = float(box.conf[0])
+            class_name = model.names[class_id]
 
-            if class_id not in DETECTION_CLASSES:
-                continue
             x1, y1, x2, y2 = box.xyxy[0].tolist()
-
-            x1 = int(x1)
-            y1 = int(y1)
-            x2 = int(x2)
-            y2 = int(y2)
-
+            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
             center_x = int((x1 + x2) / 2)
             center_y = int((y1 + y2) / 2)
-
             center = (center_x, center_y)
 
-            if not point_inside_zone(center):
+            if class_id not in DETECTION_CLASSES:
+                if DETECTION_DEBUG:
+                    print(f"DEBUG skip fel_klass: {class_name} (id={class_id}) conf={confidence:.2f} center=({center_x},{center_y})")
+                continue
+
+            in_zone = point_inside_zone(center)
+
+            if not in_zone:
+                if DETECTION_DEBUG:
+                    print(f"DEBUG skip utanfor_zon: {class_name} conf={confidence:.2f} center=({center_x},{center_y})")
                 continue
 
             detections.append(
                 {
                     "class_id": class_id,
-                    "class_name": model.names[class_id],
+                    "class_name": class_name,
                     "confidence": confidence,
                     "bbox": (x1, y1, x2, y2),
                     "center": center,
@@ -253,14 +251,26 @@ def save_passage_snapshot(
 
     snapshot_path = os.path.join(SNAPSHOT_DIR, filename)
 
+    # Annoterad snapshot (för visuell referens)
     frame_to_save = frame.copy()
-
     draw_detection_zone(frame_to_save)
     draw_count_line(frame_to_save)
     draw_lines(frame_to_save)
     draw_tracked_objects(frame_to_save, {object_id: obj})
-
     cv2.imwrite(snapshot_path, frame_to_save)
+
+    # Ren ANPR-crop från originalframe (inga overlays, full 4K-upplösning)
+    x1, y1, x2, y2 = obj["bbox"]
+    fh, fw = frame.shape[:2]
+    padding_x = int((x2 - x1) * 0.05)
+    crop_x1 = max(0, x1 - padding_x)
+    crop_x2 = min(fw, x2 + padding_x)
+    crop_y1 = max(0, y1)
+    crop_y2 = min(fh, y2)
+    if crop_x2 > crop_x1 and crop_y2 > crop_y1:
+        anpr_crop = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+        anpr_path = snapshot_path.replace(".jpg", "_anpr.jpg")
+        cv2.imwrite(anpr_path, anpr_crop)
 
     return snapshot_path
 
@@ -274,139 +284,32 @@ def get_event_type(line_name: str) -> str:
 
     return "road_passage"
 
-def append_plate_log(
-    plate_text: str,
-    confidence: float,
-    snapshot_path: str,
-    object_class: str,
-    event_type: str,
-    line_name: str,
-    direction: str,
-) -> None:
-    folder = os.path.dirname(PLATE_LOG_PATH)
-
-    if folder:
-        os.makedirs(folder, exist_ok=True)
-
-    timestamp = datetime.now().isoformat(timespec="seconds")
-
-    line = (
-        f"{timestamp} | "
-        f"plate={plate_text} | "
-        f"confidence={confidence:.2f} | "
-        f"class={object_class} | "
-        f"event_type={event_type} | "
-        f"line={line_name} | "
-        f"direction={direction} | "
-        f"snapshot={snapshot_path}"
-    )
-
-    with open(PLATE_LOG_PATH, "a", encoding="utf-8") as file:
-        file.write(line + "\n")
-
-
-def try_read_plate_from_snapshot(
-    plate_reader: PlateReader | None,
-    snapshot_path: str | None,
-    object_class: str,
-    event_type: str,
-    line_name: str,
-    direction: str,
-) -> None:
-    if plate_reader is None:
-        return
-
-    if not snapshot_path:
-        return
-
-    result = plate_reader.read_plate_from_image(snapshot_path)
-
-    if not result["plate_found"]:
-        print("ANPR: inget regnummer hittat.")
-        return
-
-    plate_text = result["plate_text"]
-    confidence = result["confidence"]
-
-    if confidence < PLATE_MIN_CONFIDENCE:
-        print(
-            f"ANPR: hittade {plate_text}, men confidence var låg: "
-            f"{confidence:.2f}"
-        )
-        return
-
-    append_plate_log(
-        plate_text=plate_text,
-        confidence=confidence,
-        snapshot_path=snapshot_path,
-        object_class=object_class,
-        event_type=event_type,
-        line_name=line_name,
-        direction=direction,
-    )
-
-    print(
-        f"ANPR: regnummer sparat: {plate_text} "
-        f"confidence={confidence:.2f}"
-    )
-
-def update_plate_candidates(
-    frame,
-    tracked_objects: dict[int, dict],
-    track_plate_manager: TrackPlateManager | None,
-) -> None:
-    if track_plate_manager is None:
-        return
-
-    for object_id, obj in tracked_objects.items():
-        if obj.get("missing", 0) > 0:
-            continue
-
-        object_class = obj["class_name"]
-
-        if object_class not in ("car", "truck", "bus", "motorcycle"):
-            continue
-
-        track_plate_manager.update_track(
-            track_id=object_id,
-            frame=frame,
-            bbox=obj["bbox"],
-        )
-
 def handle_passages(
     db: Database,
     frame,
     tracked_objects: dict[int, dict],
     line_counter: MultiLineCounter,
-    plate_reader: PlateReader | None = None,
-    track_plate_manager: TrackPlateManager | None = None,
 ) -> None:
-    
     for object_id, obj in tracked_objects.items():
         if obj.get("missing", 0) > 0:
             continue
 
-        previous_center = obj["previous_center"]
-        current_center = obj["center"]
-
         crossings = line_counter.check_crossings(
             object_id=object_id,
-            previous_point=previous_center,
-            current_point=current_center,
+            previous_point=obj["previous_center"],
+            current_point=obj["center"],
         )
 
         for crossing in crossings:
             line_name = crossing["line_name"]
             direction = crossing["direction"]
-
             event_type = get_event_type(line_name)
-
             final_category = classify_object(
                 object_class=obj["class_name"],
                 line_name=line_name,
             )
-            snapshot_path = None
 
+            snapshot_path = None
             if SAVE_SNAPSHOTS:
                 snapshot_path = save_passage_snapshot(
                     frame=frame,
@@ -428,44 +331,11 @@ def handle_passages(
                 bbox=obj["bbox"],
                 center=obj["center"],
                 snapshot_path=snapshot_path,
+                plate_detected=False,
             )
-            
-    best_plate = None
 
-    if track_plate_manager is not None:
-        best_plate = track_plate_manager.get_best_plate(object_id)
-
-    if best_plate is not None and best_plate.plate_text:
-        append_plate_log(
-            plate_text=best_plate.plate_text,
-            confidence=best_plate.confidence,
-            snapshot_path=snapshot_path or "",
-            object_class=obj["class_name"],
-            event_type=event_type,
-            line_name=line_name,
-            direction=direction,
-        )
-
-        print(
-            f"ANPR best plate saved: "
-            f"track_id={object_id} "
-            f"plate={best_plate.plate_text} "
-            f"confidence={best_plate.confidence:.2f}"
-        )
-
-    elif plate_reader is not None:
-        try_read_plate_from_snapshot(
-            plate_reader=plate_reader,
-            snapshot_path=snapshot_path,
-            object_class=obj["class_name"],
-            event_type=event_type,
-            line_name=line_name,
-            direction=direction,
-        )
-
-        total = db.count_events()
-
-        print(
+            total = db.count_events()
+            print(
                 "EVENT: "
                 f"id={object_id} | "
                 f"type={event_type} | "
@@ -506,17 +376,6 @@ def main() -> None:
     model = YOLO(YOLO_MODEL)
     print("YOLO-modell laddad.")
 
-    plate_reader = None
-    track_plate_manager = None
-
-    if PLATE_RECOGNITION_ENABLED:
-        plate_reader = PlateReader()
-        track_plate_manager = TrackPlateManager(
-        plate_reader=plate_reader,
-        min_confidence=PLATE_MIN_CONFIDENCE,
-        check_interval_seconds=1.0,
-    )
-
     db = Database(DATABASE_PATH)
 
     tracker = CentroidTracker(
@@ -537,32 +396,30 @@ def main() -> None:
 
             if not ret or frame is None:
                 cap.release()
-
-                try:
-                    cap = reconnect(RTSP_URL)
-                    continue
-                except Exception as exc:
-                    print(f"Ateranslutning misslyckades: {exc}")
-                    continue
+                cap = None
+                while cap is None:
+                    print("Tappade strommen. Forsoker ateransluta om 5 sekunder...")
+                    time.sleep(5)
+                    try:
+                        cap = open_stream(RTSP_URL)
+                    except Exception as exc:
+                        print(f"Ateranslutning misslyckades: {exc}")
+                continue
 
             frame_count += 1
 
+            if frame_count % PROCESS_EVERY_N_FRAMES != 0:
+                continue
+
             detections = detect_vehicles(model, frame)
+            old_ids = set(tracker.objects.keys())
             tracked_objects = tracker.update(detections)
 
-            update_plate_candidates(
-            frame=frame,
-            tracked_objects=tracked_objects,
-            track_plate_manager=track_plate_manager,
-            )
-
             handle_passages(
-            db=db,
-            frame=frame,
-            tracked_objects=tracked_objects,
-            line_counter=line_counter,
-            plate_reader=plate_reader,
-            track_plate_manager=track_plate_manager,
+                db=db,
+                frame=frame,
+                tracked_objects=tracked_objects,
+                line_counter=line_counter,
             )
 
             if frame_count % 150 == 0:

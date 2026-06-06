@@ -80,7 +80,8 @@ RTSP_URL = os.getenv("RTSP_URL")
 SHOW_WINDOW = get_bool("SHOW_WINDOW", True)
 
 YOLO_MODEL = os.getenv("YOLO_MODEL", "yolov8n.pt")
-CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.55"))
+CONFIDENCE_THRESHOLD = float(os.getenv("CONFIDENCE_THRESHOLD", "0.40"))
+DETECTION_DEBUG = get_bool("DETECTION_DEBUG", False)
 
 VEHICLE_CLASSES = get_int_set("VEHICLE_CLASSES", {2, 3, 5, 7})
 DETECTION_CLASSES = get_int_set(
@@ -97,6 +98,8 @@ SNAPSHOT_DIR = os.getenv("SNAPSHOT_DIR", "data/snapshots")
 DETECTION_SAVE_INTERVAL_SECONDS = int(
     os.getenv("DETECTION_SAVE_INTERVAL_SECONDS", "10")
 )
+
+PROCESS_EVERY_N_FRAMES = int(os.getenv("PROCESS_EVERY_N_FRAMES", "1"))
 
 DETECTION_ZONE = get_polygon(
     "DETECTION_ZONE",
@@ -123,6 +126,15 @@ DRAW_COUNT_LINE = get_bool("DRAW_COUNT_LINE", True)
 TRACKER_MAX_DISTANCE = int(os.getenv("TRACKER_MAX_DISTANCE", "120"))
 TRACKER_MAX_MISSING_FRAMES = int(os.getenv("TRACKER_MAX_MISSING_FRAMES", "25"))
 
+if PROCESS_EVERY_N_FRAMES > 1 and TRACKER_MAX_DISTANCE < PROCESS_EVERY_N_FRAMES * 100:
+    import warnings
+    warnings.warn(
+        f"TRACKER_MAX_DISTANCE={TRACKER_MAX_DISTANCE} kan vara för litet när "
+        f"PROCESS_EVERY_N_FRAMES={PROCESS_EVERY_N_FRAMES}. "
+        f"Rekommenderat minimum: {PROCESS_EVERY_N_FRAMES * 100}.",
+        stacklevel=2,
+    )
+
 DISPLAY_SCALE = float(os.getenv("DISPLAY_SCALE", "0.5"))
 
 BEST_OF_TWO_ENABLED = get_bool("BEST_OF_TWO_ENABLED", True)
@@ -140,6 +152,8 @@ WEB_UPLOAD_UPLOAD_INDEX = get_bool("WEB_UPLOAD_UPLOAD_INDEX", True)
 PLATE_RECOGNITION_ENABLED = get_bool("PLATE_RECOGNITION_ENABLED", False)
 PLATE_LOG_PATH = os.getenv("PLATE_LOG_PATH", "data/plates_found.txt")
 PLATE_MIN_CONFIDENCE = float(os.getenv("PLATE_MIN_CONFIDENCE", "0.30"))
+PLATE_READER_GPU = get_bool("PLATE_READER_GPU", False)
+PLATE_READER_SHARPNESS_THRESHOLD = float(os.getenv("PLATE_READER_SHARPNESS_THRESHOLD", "80.0"))
 
 if not RTSP_URL:
     raise ValueError("RTSP_URL saknas. Lägg den i .env")

@@ -6,12 +6,13 @@ import easyocr
 
 
 PLATE_PATTERN = re.compile(r"[A-Z]{3}[0-9]{2}[A-Z0-9]")
+PLATE_ALLOWLIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 
 class PlateReader:
-    def __init__(self):
-        print("Loading EasyOCR...")
-        self.reader = easyocr.Reader(["en"], gpu=False)
+    def __init__(self, gpu: bool = False):
+        print(f"Loading EasyOCR (gpu={gpu})...")
+        self.reader = easyocr.Reader(["en"], gpu=gpu)
         print("EasyOCR loaded.")
 
     def clean_text(self, text: str) -> str:
@@ -44,7 +45,11 @@ class PlateReader:
                 interpolation=cv2.INTER_CUBIC,
             )
 
-        gray = cv2.bilateralFilter(gray, 9, 75, 75)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        gray = clahe.apply(gray)
+
+        blurred = cv2.GaussianBlur(gray, (0, 0), 3)
+        gray = cv2.addWeighted(gray, 1.5, blurred, -0.5, 0)
 
         return gray
 
@@ -68,7 +73,7 @@ class PlateReader:
             }
 
         processed = self.preprocess_image(image)
-        results = self.reader.readtext(processed)
+        results = self.reader.readtext(processed, allowlist=PLATE_ALLOWLIST)
 
         best_plate = None
         best_confidence = 0.0

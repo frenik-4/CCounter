@@ -52,22 +52,30 @@ Done:
 - multiple line configuration
 - multi-line counter foundation
 - main road line
-- parking entry line
+- parking entry line (tuned to road/gravel boundary)
 - live multi-line event counting tested
 - event snapshots saved locally
 - local known plate classification foundation
 - object category classifier
-- safe public stats export foundation
+- safe public stats export (SQL-aggregerad, inklusive individuella events per timme utan privat data)
 - static public dashboard
 - SFTP publishing to external web hosting
 - automatic public publishing foundation
 - architecture documentation
-- Reolink RLC-811A camera installed and tested
-- basic ANPR test with EasyOCR
-- ANPR can read from snapshot/crop images
-- `TrackPlateManager` foundation added
-- best plate candidate can be tracked per object ID
-- temporary plate results are written to `data/plates_found.txt`
+- Reolink RLC-811A camera installed and tested, 5x optisk zoom konfigurerad
+- ANPR med EasyOCR (asynkron, snapshot-baserad)
+- `anpr_worker.py` — fristående worker som bearbetar sparade snapshots
+- ren `_anpr.jpg`-crop (full 4K, inga overlays) sparas vid varje korsning
+- `anpr_attempted`-flagga i databasen — förhindrar att events bearbetas om
+- schemalagd ANPR-worker körs automatiskt varje hel timme via Claude Scheduled Tasks
+- realtids-ANPR borttagen från `app.py` (gick åt för mycket CPU)
+- `database.py`: `update_event_plate()`, `get_unprocessed_anpr_events()`, `mark_anpr_attempted()`
+- CLAHE + unsharp mask preprocessing, EasyOCR allowlist `A-Z0-9`
+- blur detection via Laplacian variance
+- `PROCESS_EVERY_N_FRAMES` implemented for CPU savings
+- publik dashboard: riktningsstatistik (Söderut/Norrut), korrigerade A→B/B→A-riktningar
+- fotgängare filtreras bort från publik export
+- bugfixes: handle_passages scope, reconnect loop, export memory usage
 
 ## Current camera
 
@@ -75,9 +83,9 @@ Current camera:
 
 - Reolink RLC-811A
 - Ethernet/PoE
+- 3840×2160 (4K), 25 fps
 - RTSP stream working
-- better image quality than the temporary Deltaco camera
-- used for current tuning and ANPR testing
+- DISPLAY_SCALE=0.4
 
 Previous temporary camera:
 
@@ -118,11 +126,11 @@ Public dashboard:
 Public dashboard currently shows:
 
 - selectable day
-- totals for selected day
-- categories
-- hourly summary
-- expandable hourly events
-- daily hour graph
+- totals for selected day (exkl. fotgängare och parkering)
+- kategorier
+- riktningsstatistik: Söderut (A→B) och Norrut (B→A)
+- timmar med individuella events (tid, typ, kategori, riktning — inga reg.nr)
+- dygnsgraf
 
 Public dashboard must not show:
 
@@ -134,64 +142,36 @@ Public dashboard must not show:
 
 ## Next steps
 
-1. Continue live testing with the Reolink camera.
-2. Tune detection zone for the new camera view.
-3. Tune main road line.
-4. Tune parking entry line.
-5. Decide whether parking events should remain hidden from the public dashboard.
-6. Add parking exit line if needed.
-7. Improve event classification.
-8. Improve ANPR accuracy.
-9. Store ANPR results in the local database instead of only `plates_found.txt`.
-10. Add database summary commands.
-11. Prepare Linux 24/7 server setup.
-12. Move project from Windows development machine to Linux server.
-13. Configure CCounter to run automatically on server boot.
-14. Configure public export/publishing on the server.
-15. Add monitoring/logging for 24/7 operation.
+1. Verifiera zon och linjer med verklig trafik — justera vid behov.
+2. ANPR-träffsäkerhet — utvärdera efter några dagars körning med ny kameravinkel och `_anpr.jpg`-crops.
+3. Eventuellt sänka `PLATE_READER_SHARPNESS_THRESHOLD` (nu 80.0) om för många crops kastas.
+4. Lägg till parkeringsutfarts-linje om separering av in/ut önskas.
+5. Förbättra klassificering av events.
+6. GPU för ANPR (`PLATE_READER_GPU=true`) när RTX 3050 eller liknande installerats på servern.
+7. Lägg till databas-summeringskommandon.
+8. Förbered Linux 24/7-server (systemd-tjänst, automatisk start).
+9. Flytta projektet från Windows-dev till Linux-server.
+10. Konfigurera publik export/publicering på servern.
+11. Lägg till övervakning/loggning för 24/7-drift.
 
 ## Current ANPR status
 
-Current ANPR implementation:
+Arkitektur (asynkron, snapshot-baserad):
 
-- EasyOCR is installed.
-- `PlateReader` can read from image files and image arrays.
-- `TrackPlateManager` keeps best plate candidate per track ID.
-- ANPR can run on vehicle crops while a vehicle is visible.
-- Best temporary result can be written to `data/plates_found.txt`.
-- ANPR results are not yet stored in the main `events` database table.
+- `app.py` sparar en ren `_anpr.jpg`-crop (full 4K, inga overlays) vid varje korsning.
+- `anpr_worker.py` körs automatiskt varje hel timme via Claude Scheduled Tasks.
+- Workern bearbetar bara events med `anpr_attempted=0` — processas aldrig om.
+- Försök 1: ladda `_anpr.jpg`-crop (ny metod, inga overlays).
+- Försök 2: croppa fordon ur full annoterad snapshot med bbox från DB (retroaktiv).
+- Försök 3: hela snapshot som sista utväg.
+- `PlateReader`: CLAHE + unsharp mask, EasyOCR `A-Z0-9` allowlist, blur detection.
+- GPU disabled by default (`PLATE_READER_GPU=false`).
 
-Current limitations:
+Träffsäkerhet:
 
-- ANPR accuracy still needs real-world testing.
-- OCR may be slow if run too often.
-- OCR should not run on every frame.
-- OCR should focus on vehicle crops, not full-frame snapshots.
-- Camera angle, zoom, shutter speed and lighting will affect results heavily.
-
-## Planned ANPR improvement
-
-Improved ANPR flow:
-
-- Track each vehicle while it is visible.
-- Keep best candidate image per track ID.
-- Run ANPR periodically, not every frame.
-- Run ANPR on vehicle crop instead of full snapshot.
-- Store best plate result per track:
-  - plate text
-  - OCR confidence
-  - snapshot/crop path
-  - timestamp
-- When the vehicle crosses a count line:
-  - save the event
-  - attach the best plate result found during the whole track
-  - store this in the local database
-- Match detected plates against local known plates.
-- Use known plates for:
-  - exclusion
-  - separate grouping
-  - internal reporting
-- License plates must remain local only and must never be included in public exports.
+- Gamla events (bred kameravinkel): ~14% (29/200) träff.
+- Nya events (5x zoom, ren crop): ännu inte utvärderat.
+- `PLATE_MIN_CONFIDENCE=0.30`, `PLATE_READER_SHARPNESS_THRESHOLD=80.0`.
 
 ## Local known-plate handling
 
@@ -214,66 +194,77 @@ Rules:
 ## Important design decisions
 
 - SQLite is the local source of truth.
-- Google Sheets or external website should only receive exported summaries.
+- External website should only receive exported summaries.
 - License plates stay local only.
 - Snapshots stay local only.
 - The external website must never access the camera stream.
 - The external website must never read the private event database directly.
 - Public exports must be generated from filtered/safe data only.
-- Parking traffic can be stored locally even if hidden from the public dashboard.
+- Parking traffic is stored locally but hidden from the public dashboard.
+
+## Current .env — key values
+
+```
+DETECTION_ZONE=0,759;3204,759;3204,2089;0,2089
+LINES=main_count_line:2189,759,2189,1650;parking_entry_line:1028,2076,3204,1322
+DISPLAY_SCALE=0.4
+PROCESS_EVERY_N_FRAMES=3
+CONFIDENCE_THRESHOLD=0.40
+TRACKER_MAX_DISTANCE=400
+TRACKER_MAX_MISSING_FRAMES=25
+PLATE_RECOGNITION_ENABLED=true
+PLATE_MIN_CONFIDENCE=0.30
+PLATE_READER_GPU=false
+PLATE_READER_SHARPNESS_THRESHOLD=80.0
+SAVE_SNAPSHOTS=true
+```
+
+Kamera: Reolink RLC-811A, 5x optisk zoom, monterad mot vägen.
+Räknelinjen (main_count_line) är lodrät, passerar vägen precis vid grusgränsen.
+Parkeringslinjen (parking_entry_line) är diagonal längs väg/grusgränsen.
 
 ## Useful commands
 
-Run app:
-
-```powershell
-python -m src.ccounter.app
-```
-
-Start app with batch file:
+Start app:
 
 ```powershell
 .\start_ccounter.bat
 ```
 
-Show recent events:
+Kör ANPR-worker manuellt:
 
 ```powershell
-python -m src.ccounter.show_events
+.\.venv\Scripts\python.exe -m src.ccounter.anpr_worker
 ```
 
-Open temporary ANPR results:
+Visa senaste events:
 
 ```powershell
-notepad data\plates_found.txt
+.\.venv\Scripts\python.exe -m src.ccounter.show_events
 ```
 
-Export public JSON:
+Exportera publik JSON:
 
 ```powershell
-python -m src.ccounter.export_public_json
+.\.venv\Scripts\python.exe -m src.ccounter.export_public_json
 ```
 
-Publish public site:
+Publicera webbsida:
 
 ```powershell
-python -m src.ccounter.publish_public_site
+.\.venv\Scripts\python.exe -m src.ccounter.publish_public_site
 ```
 
-Run helper tests:
+Kör tester:
 
 ```powershell
-python -m src.ccounter.config_test
-python -m src.ccounter.counter_test
-python -m src.ccounter.classifier_test
-python -m src.ccounter.plates_test
-python -m src.ccounter.stats_test
+.\.venv\Scripts\python.exe -m pytest src/ccounter/ -q
 ```
 
-Syntax check:
+Syntaxkoll:
 
 ```powershell
-python -m py_compile src\ccounter\app.py
+.\.venv\Scripts\python.exe -m py_compile src\ccounter\app.py
 ```
 
 Commit:
@@ -296,6 +287,7 @@ src/ccounter/classifier.py
 src/ccounter/plates.py
 src/ccounter/plate_reader.py
 src/ccounter/track_plate_manager.py
+src/ccounter/anpr_worker.py
 src/ccounter/stats.py
 src/ccounter/export_public_json.py
 src/ccounter/publish_public_site.py

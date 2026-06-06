@@ -89,7 +89,7 @@
 
     .grid {
       display: grid;
-      grid-template-columns: repeat(4, 1fr);
+      grid-template-columns: repeat(3, 1fr);
       gap: 14px;
       margin-bottom: 18px;
     }
@@ -323,6 +323,10 @@
         grid-template-columns: repeat(2, 1fr);
       }
 
+      .grid .card:last-child {
+        grid-column: span 2;
+      }
+
       .hour-header {
         grid-template-columns: 1fr 28px;
       }
@@ -399,6 +403,24 @@
         <div class="metric-value" id="selectedDayLabel">–</div>
         <div class="metric-note">Aktivt datum</div>
       </div>
+
+      <div class="card">
+        <div class="metric-label">Söderut</div>
+        <div class="metric-value" id="dirSouth">–</div>
+        <div class="metric-note">Fordon A→B</div>
+      </div>
+
+      <div class="card">
+        <div class="metric-label">Norrut</div>
+        <div class="metric-value" id="dirNorth">–</div>
+        <div class="metric-note">Fordon B→A</div>
+      </div>
+
+      <div class="card">
+        <div class="metric-label">Okänd riktning</div>
+        <div class="metric-value" id="dirUnknown">–</div>
+        <div class="metric-note">Ej klassificerade</div>
+      </div>
     </section>
 
     <section class="card section">
@@ -442,11 +464,11 @@
 
     function translateDirection(direction) {
       if (direction === "A_TO_B") {
-        return "Norrut";
+        return "Söderut";
       }
 
       if (direction === "B_TO_A") {
-        return "Söderut";
+        return "Norrut";
       }
 
       return direction || "";
@@ -458,6 +480,20 @@
         event.event_type === "parking_exit" ||
         event.category === "parking_traffic"
       );
+    }
+
+    function countDirections(hours) {
+      let south = 0, north = 0, unknown = 0;
+
+      for (const hour of hours || []) {
+        for (const event of hour.events || []) {
+          if (event.direction === "A_TO_B") south++;
+          else if (event.direction === "B_TO_A") north++;
+          else unknown++;
+        }
+      }
+
+      return { south, north, unknown };
     }
 
     function setupDateSelect(stats) {
@@ -682,6 +718,11 @@
       setText("roadTraffic", roadTraffic);
       setText("otherTraffic", other);
       setText("selectedDayLabel", date);
+
+      const dirs = countDirections(day.hours || []);
+      setText("dirSouth", dirs.south);
+      setText("dirNorth", dirs.north);
+      setText("dirUnknown", dirs.unknown);
 
       renderCategoryBars(day.categories || {});
       renderHourList(day.hours || []);
