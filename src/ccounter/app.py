@@ -306,7 +306,12 @@ class BestCropTracker:
 
         crop = frame[cy1:cy2, cx1:cx2]
         gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+        # Klippa övermättade pixlar (strålkastare, IR-reflex) innan skärpemätning.
+        # Utan klippning dominerar ljuskällor Laplacian-variansen trots att bilden
+        # i övrigt är rörelseoskarp — särskilt påtagligt på natten.
+        gray_clipped = np.clip(gray, 0, 180)
+        sharpness = float(cv2.Laplacian(gray_clipped, cv2.CV_64F).var())
 
         if track_id not in self._best or sharpness > self._best[track_id][0]:
             self._best[track_id] = (sharpness, crop.copy())
