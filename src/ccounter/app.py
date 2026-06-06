@@ -50,6 +50,10 @@ def open_stream(rtsp_url: str) -> cv2.VideoCapture:
             "Kontrollera RTSP_URL, losenord, natverk och kamera."
         )
 
+    # Begränsa intern buffert till 1 frame så att cap.read() alltid
+    # returnerar aktuell frame — inte en uppsamlad backlog från strömmen.
+    cap.set(cv2.CAP_PROP_BUFFERSIZE, 1)
+
     print("RTSP-strom oppnad.")
     return cap
 
