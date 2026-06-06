@@ -160,54 +160,54 @@ Prioriterade förbättringar överenskomna. Snapshot-rensning hanteras manuellt 
 
 ### Hög prioritet
 
-- [ ] **Översätt kategorier och event-typer i dashboard**
+- [x] **Översätt kategorier och event-typer i dashboard**
   Kategorinamn (`road_traffic`, `bicycle` m.fl.) och event-typer (`road_passage`) visas rakt av.
   Lägg till svensk uppslagstabell i JS.
 
-- [ ] **Fixa "Övrigt"-kortets beskrivning**
+- [x] **Fixa "Övrigt"-kortets beskrivning**
   Beskrivningen säger "Personer, cyklar, djur m.m." men fotgängare filtreras bort från publik export.
   Justera till faktiska kategorier som visas.
 
-- [ ] **Begränsa stats.json till senaste 30/60 dagarna**
+- [x] **Begränsa stats.json till senaste 30/60 dagarna**
   Exporten innehåller all historik — växer obegränsat. Lägg till `EXPORT_MAX_DAYS`-parameter i `.env`.
 
 ### Medium prioritet
 
-- [ ] **Pre-aggregera riktningar i export_public_json.py**
+- [x] **Pre-aggregera riktningar i export_public_json.py**
   Söderut/Norrut-räkning sker nu i JS via event-loop. Bör läggas som `dir_south`/`dir_north` på dagnivå
   i JSON direkt från SQL för att minska JS-last och göra data mer robust.
 
-- [ ] **Topptimme-kort istället för "Vald dag"-kortet**
+- [x] **Topptimme-kort istället för "Vald dag"-kortet**
   "Vald dag"-kortet upprepar bara datumet. Ersätt med "Topptimme" — vilken timme hade mest trafik.
 
-- [ ] **Auto-refresh var 15 min + åldersindikator**
+- [x] **Auto-refresh var 15 min + åldersindikator**
   Sidan hämtar stats.json en gång. Lägg till `setInterval` som kontrollerar `generated_at` och laddar om
   vid ny data. Visa tydligt hur gamla nuvarande data är ("Data från för 2 timmar sedan").
 
 ### Lägre prioritet
 
-- [ ] **Staplad riktningsgraf i dygnsgraf**
+- [x] **Staplad riktningsgraf i dygnsgraf**
   Dygnsgraf visar bara totalt. Dela upp i Söderut (blå) + Norrut (grön) med staplade bars.
 
-- [ ] **Veckotrend-vy**
+- [x] **Veckotrend-vy** (upp till 14 dagar, klickbar dagväljare)
   Komplement till dagsvyn — 7-dagars rullande snitt eller stapelgraf per dag senaste veckan.
 
-- [ ] **Cooldown mot dubbelräkning vid backning**
+- [x] **Cooldown mot dubbelräkning vid backning** (löst av counter.py:s counted_ids — ingen extra kod behövdes)
   Om fordon backar över linjen räknas det som nytt event.
   Ignorera korsning från samma track_id på samma linje om < 5 sekunder sedan senaste korsning.
 
-- [ ] **Städa döda config-värden**
+- [x] **Städa döda config-värden**
   `BEST_OF_TWO_ENABLED`, `BEST_OF_TWO_DELAY_SECONDS`, `PLATE_RECOGNITION_ENABLED` finns i `.env`/`config.py`
   men används inte längre. Ta bort.
 
-- [ ] **Felhantering i export_public_json.py**
+- [x] **Felhantering i export_public_json.py**
   Om SQLite är låst kraschar exporten tyst. Fånga lock-fel och logga varning.
 
-- [ ] **Filtrera pedestrian på final_category också**
+- [x] **Filtrera pedestrian på final_category också**
   Exporten filtrerar `object_class != 'person'` men inte `final_category != 'pedestrian'`.
   Lägg till för robusthet om YOLO-klassnamn ändras i framtida modell.
 
-- [ ] **Mobil: visa minst en siffra i timhuvudet**
+- [x] **Mobil: visa minst en siffra i timhuvudet**
   På mobil döljs alla hour-stat-kolumner. Minst totalt-antalet bör synas.
 
 ## Current ANPR status
