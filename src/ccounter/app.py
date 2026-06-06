@@ -237,6 +237,7 @@ def save_passage_snapshot(
     obj: dict,
     line_name: str,
     direction: str,
+    best_crop: np.ndarray | None = None,
 ) -> str:
     os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 
@@ -259,20 +260,63 @@ def save_passage_snapshot(
     draw_tracked_objects(frame_to_save, {object_id: obj})
     cv2.imwrite(snapshot_path, frame_to_save)
 
-    # Ren ANPR-crop från originalframe (inga overlays, full 4K-upplösning)
-    x1, y1, x2, y2 = obj["bbox"]
-    fh, fw = frame.shape[:2]
-    padding_x = int((x2 - x1) * 0.05)
-    crop_x1 = max(0, x1 - padding_x)
-    crop_x2 = min(fw, x2 + padding_x)
-    crop_y1 = max(0, y1)
-    crop_y2 = min(fh, y2)
-    if crop_x2 > crop_x1 and crop_y2 > crop_y1:
-        anpr_crop = frame[crop_y1:crop_y2, crop_x1:crop_x2]
+    # ANPR-crop: använd skarpaste trackade crop om tillgänglig,
+    # annars croppa från korsningsframen som fallback.
+    anpr_crop = best_crop
+    if anpr_crop is None:
+        x1, y1, x2, y2 = obj["bbox"]
+        fh, fw = frame.shape[:2]
+        padding_x = int((x2 - x1) * 0.05)
+        cx1 = max(0, x1 - padding_x)
+        cx2 = min(fw, x2 + padding_x)
+        cy1 = max(0, y1)
+        cy2 = min(fh, y2)
+        if cx2 > cx1 and cy2 > cy1:
+            anpr_crop = frame[cy1:cy2, cx1:cx2]
+
+    if anpr_crop is not None:
         anpr_path = snapshot_path.replace(".jpg", "_anpr.jpg")
         cv2.imwrite(anpr_path, anpr_crop)
 
     return snapshot_path
+
+
+class BestCropTracker:
+    """
+    Spårar den skarpaste fordonscroppen per track ID i realtid — ingen OCR.
+    Används för att ge anpr_worker bästa möjliga bildunderlag vid korsning.
+    """
+
+    VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
+
+    def __init__(self) -> None:
+        self._best: dict[int, tuple[float, np.ndarray]] = {}
+
+    def update(self, track_id: int, frame, bbox: tuple[int, int, int, int]) -> None:
+        x1, y1, x2, y2 = bbox
+        fh, fw = frame.shape[:2]
+        padding_x = int((x2 - x1) * 0.05)
+        cx1 = max(0, x1 - padding_x)
+        cx2 = min(fw, x2 + padding_x)
+        cy1 = max(0, y1)
+        cy2 = min(fh, y2)
+
+        if cx2 <= cx1 or cy2 <= cy1:
+            return
+
+        crop = frame[cy1:cy2, cx1:cx2]
+        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+        sharpness = float(cv2.Laplacian(gray, cv2.CV_64F).var())
+
+        if track_id not in self._best or sharpness > self._best[track_id][0]:
+            self._best[track_id] = (sharpness, crop.copy())
+
+    def get(self, track_id: int) -> np.ndarray | None:
+        entry = self._best.get(track_id)
+        return entry[1] if entry is not None else None
+
+    def remove(self, track_id: int) -> None:
+        self._best.pop(track_id, None)
 
 
 def get_event_type(line_name: str) -> str:
@@ -289,6 +333,7 @@ def handle_passages(
     frame,
     tracked_objects: dict[int, dict],
     line_counter: MultiLineCounter,
+    best_crop_tracker: "BestCropTracker | None" = None,
 ) -> None:
     for object_id, obj in tracked_objects.items():
         if obj.get("missing", 0) > 0:
@@ -311,12 +356,18 @@ def handle_passages(
 
             snapshot_path = None
             if SAVE_SNAPSHOTS:
+                best_crop = (
+                    best_crop_tracker.get(object_id)
+                    if best_crop_tracker is not None
+                    else None
+                )
                 snapshot_path = save_passage_snapshot(
                     frame=frame,
                     object_id=object_id,
                     obj=obj,
                     line_name=line_name,
                     direction=direction,
+                    best_crop=best_crop,
                 )
 
             db.insert_event(
@@ -384,6 +435,7 @@ def main() -> None:
     )
 
     line_counter = MultiLineCounter(LINES)
+    best_crop_tracker = BestCropTracker()
 
     cap = open_stream(RTSP_URL)
 
@@ -415,11 +467,24 @@ def main() -> None:
             old_ids = set(tracker.objects.keys())
             tracked_objects = tracker.update(detections)
 
+            # Uppdatera BestCropTracker med skärpaste crop per fordon
+            for object_id, obj in tracked_objects.items():
+                if obj.get("missing", 0) > 0:
+                    continue
+                if obj["class_name"] not in BestCropTracker.VEHICLE_CLASSES:
+                    continue
+                best_crop_tracker.update(object_id, frame, obj["bbox"])
+
+            # Rensa IDs som försvunnit ur trackern
+            for removed_id in old_ids - set(tracked_objects.keys()):
+                best_crop_tracker.remove(removed_id)
+
             handle_passages(
                 db=db,
                 frame=frame,
                 tracked_objects=tracked_objects,
                 line_counter=line_counter,
+                best_crop_tracker=best_crop_tracker,
             )
 
             if frame_count % 150 == 0:
