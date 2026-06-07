@@ -270,11 +270,13 @@ def save_passage_snapshot(
     if anpr_crop is None:
         x1, y1, x2, y2 = obj["bbox"]
         fh, fw = frame.shape[:2]
+        h = y2 - y1
         padding_x = int((x2 - x1) * 0.05)
+        padding_y_bottom = int(h * 0.15)
         cx1 = max(0, x1 - padding_x)
         cx2 = min(fw, x2 + padding_x)
         cy1 = max(0, y1)
-        cy2 = min(fh, y2)
+        cy2 = min(fh, y2 + padding_y_bottom)
         if cx2 > cx1 and cy2 > cy1:
             anpr_crop = frame[cy1:cy2, cx1:cx2]
 
@@ -299,17 +301,30 @@ class BestCropTracker:
     def update(self, track_id: int, frame, bbox: tuple[int, int, int, int]) -> None:
         x1, y1, x2, y2 = bbox
         fh, fw = frame.shape[:2]
+        h = y2 - y1
+
+        # Horisontell padding: 5 % på varje sida.
+        # Vertikal padding nedtill: 15 % extra — fångar frontplåten som
+        # ofta hamnar precis under YOLO-bbox vid frontala genomkörningar.
         padding_x = int((x2 - x1) * 0.05)
+        padding_y_bottom = int(h * 0.15)
+
         cx1 = max(0, x1 - padding_x)
         cx2 = min(fw, x2 + padding_x)
         cy1 = max(0, y1)
-        cy2 = min(fh, y2)
+        cy2 = min(fh, y2 + padding_y_bottom)
 
         if cx2 <= cx1 or cy2 <= cy1:
             return
 
         crop = frame[cy1:cy2, cx1:cx2]
-        gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+
+        # Skärpemätning på den tight (opadded) delen — undvik att bakgrunden
+        # under bilen påverkar Laplacian-variansen.
+        tight = frame[max(0, y1):min(fh, y2), max(0, x1):min(fw, x2)]
+        if tight.size == 0:
+            return
+        gray = cv2.cvtColor(tight, cv2.COLOR_BGR2GRAY)
 
         # Klippa övermättade pixlar (strålkastare, IR-reflex) innan skärpemätning.
         # Utan klippning dominerar ljuskällor Laplacian-variansen trots att bilden
