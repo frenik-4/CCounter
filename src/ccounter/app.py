@@ -260,8 +260,6 @@ def save_passage_snapshot(
     # Annoterad snapshot (för visuell referens)
     frame_to_save = frame.copy()
     draw_detection_zone(frame_to_save)
-    draw_count_line(frame_to_save)
-    draw_lines(frame_to_save)
     draw_tracked_objects(frame_to_save, {object_id: obj})
     cv2.imwrite(snapshot_path, frame_to_save)
 
