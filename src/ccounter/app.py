@@ -32,6 +32,7 @@ from src.ccounter.database import Database
 from src.ccounter.tracker import CentroidTracker
 from src.ccounter.counter import MultiLineCounter
 from src.ccounter.classifier import classify_object
+from src.ccounter.config import ANPR_MIN_BBOX_WIDTH
 
 
 # Testa senare igen när ethernet är inkopplat.
@@ -295,18 +296,28 @@ class BestCropTracker:
 
     VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
 
+    MIN_BBOX_WIDTH = ANPR_MIN_BBOX_WIDTH
+
     def __init__(self) -> None:
         self._best: dict[int, tuple[float, np.ndarray]] = {}
 
     def update(self, track_id: int, frame, bbox: tuple[int, int, int, int]) -> None:
         x1, y1, x2, y2 = bbox
         fh, fw = frame.shape[:2]
+        w = x2 - x1
         h = y2 - y1
+
+        # Hoppa över frames där fordonet är för smalt i bild — t.ex. när det
+        # precis dyker upp bakom vegetation och knappt är synligt. Utan detta
+        # väljs ofta det allra första frame med hög kantkontrast (strålkastare
+        # mot mörk bakgrund) trots att skylten inte alls är synlig.
+        if w < self.MIN_BBOX_WIDTH:
+            return
 
         # Horisontell padding: 5 % på varje sida.
         # Vertikal padding nedtill: 15 % extra — fångar frontplåten som
         # ofta hamnar precis under YOLO-bbox vid frontala genomkörningar.
-        padding_x = int((x2 - x1) * 0.05)
+        padding_x = int(w * 0.05)
         padding_y_bottom = int(h * 0.15)
 
         cx1 = max(0, x1 - padding_x)
