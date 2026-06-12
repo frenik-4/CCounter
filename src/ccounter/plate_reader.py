@@ -94,6 +94,16 @@ class PlateReader:
                     best_plate = candidate
                     best_confidence = float(confidence)
 
+        # EasyOCR delar ibland upp skylten i flera segment (t.ex. "MRP" + "281").
+        # Försök kombinera alla segment och sök mönstret i den sammansatta texten.
+        if best_plate is None and len(raw_results) > 1:
+            combined = "".join(self.clean_text(r["text"]) for r in raw_results)
+            candidates = self.extract_plate_candidates(combined)
+            if candidates:
+                avg_conf = sum(r["confidence"] for r in raw_results) / len(raw_results)
+                best_plate = candidates[0]
+                best_confidence = avg_conf
+
         return {
             "plate_found": best_plate is not None,
             "plate_text": best_plate,
