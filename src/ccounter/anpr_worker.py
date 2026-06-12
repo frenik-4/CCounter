@@ -56,19 +56,36 @@ def process_event(event, plate_reader: PlateReader) -> tuple[str, float] | None:
     """
     Försöker läsa regnummer för ett event.
 
-    1. Om en _anpr.jpg-crop finns (ny metod) — använd den direkt.
-    2. Annars ladda fullbilden och croppa med bbox (retroaktiv metod).
+    1. Provar _anpr1.jpg–_anpr5.jpg (top-5 skarpaste crops), tar högst konfidens.
+    2. Bakåtkompatibilitet: _anpr.jpg (gammal namnkonvention utan nummer).
+    3. Croppar ur fullbild med bbox (retroaktiv metod).
+    4. Hela bilden som sista utväg.
     """
     snapshot_path = event["snapshot_path"]
 
     if not snapshot_path or not os.path.exists(snapshot_path):
         return None
 
-    # --- Försök 1: ren ANPR-crop (sparad av ny version av app.py) ---
-    anpr_crop_path = snapshot_path.replace(".jpg", "_anpr.jpg")
+    # --- Försök 1: numrerade ANPR-crops (top-5, bäst konfidens vinner) ---
+    best_result: tuple[str, float] | None = None
+    for i in range(1, 6):
+        anpr_path = snapshot_path.replace(".jpg", f"_anpr{i}.jpg")
+        if not os.path.exists(anpr_path):
+            break
+        image = cv2.imread(anpr_path)
+        if image is None:
+            continue
+        result = try_read(plate_reader, image)
+        if result is not None and (best_result is None or result[1] > best_result[1]):
+            best_result = result
 
-    if os.path.exists(anpr_crop_path):
-        image = cv2.imread(anpr_crop_path)
+    if best_result is not None:
+        return best_result
+
+    # --- Bakåtkompatibilitet: _anpr.jpg (äldre events utan nummer) ---
+    legacy_path = snapshot_path.replace(".jpg", "_anpr.jpg")
+    if os.path.exists(legacy_path):
+        image = cv2.imread(legacy_path)
         if image is not None:
             result = try_read(plate_reader, image)
             if result is not None:

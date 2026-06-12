@@ -242,7 +242,7 @@ def save_passage_snapshot(
     obj: dict,
     line_name: str,
     direction: str,
-    best_crop: np.ndarray | None = None,
+    best_crops: list[np.ndarray] | None = None,
 ) -> str:
     os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 
@@ -263,10 +263,13 @@ def save_passage_snapshot(
     draw_tracked_objects(frame_to_save, {object_id: obj})
     cv2.imwrite(snapshot_path, frame_to_save)
 
-    # ANPR-crop: använd skarpaste trackade crop om tillgänglig,
-    # annars croppa från korsningsframen som fallback.
-    anpr_crop = best_crop
-    if anpr_crop is None:
+    # ANPR-crops: spara upp till TOP_N skarpaste frames (bäst först).
+    # Fallback: croppa från korsningsframen om inga trackade crops finns.
+    if best_crops:
+        for i, crop in enumerate(best_crops, start=1):
+            anpr_path = snapshot_path.replace(".jpg", f"_anpr{i}.jpg")
+            cv2.imwrite(anpr_path, crop)
+    else:
         x1, y1, x2, y2 = obj["bbox"]
         fh, fw = frame.shape[:2]
         h = y2 - y1
@@ -277,11 +280,8 @@ def save_passage_snapshot(
         cy1 = max(0, y1)
         cy2 = min(fh, y2 + padding_y_bottom)
         if cx2 > cx1 and cy2 > cy1:
-            anpr_crop = frame[cy1:cy2, cx1:cx2]
-
-    if anpr_crop is not None:
-        anpr_path = snapshot_path.replace(".jpg", "_anpr.jpg")
-        cv2.imwrite(anpr_path, anpr_crop)
+            anpr_path = snapshot_path.replace(".jpg", "_anpr1.jpg")
+            cv2.imwrite(anpr_path, frame[cy1:cy2, cx1:cx2])
 
     return snapshot_path
 
@@ -296,8 +296,10 @@ class BestCropTracker:
 
     MIN_BBOX_WIDTH = ANPR_MIN_BBOX_WIDTH
 
+    TOP_N = 5
+
     def __init__(self) -> None:
-        self._best: dict[int, tuple[float, np.ndarray]] = {}
+        self._candidates: dict[int, list[tuple[float, np.ndarray]]] = {}
 
     def update(self, track_id: int, frame, bbox: tuple[int, int, int, int]) -> None:
         x1, y1, x2, y2 = bbox
@@ -341,15 +343,21 @@ class BestCropTracker:
         gray_clipped = np.clip(gray, 0, 180)
         sharpness = float(cv2.Laplacian(gray_clipped, cv2.CV_64F).var())
 
-        if track_id not in self._best or sharpness > self._best[track_id][0]:
-            self._best[track_id] = (sharpness, crop.copy())
+        candidates = self._candidates.setdefault(track_id, [])
+        candidates.append((sharpness, crop.copy()))
+        candidates.sort(key=lambda x: -x[0])
+        if len(candidates) > self.TOP_N:
+            candidates.pop()
+
+    def get_all(self, track_id: int) -> list[np.ndarray]:
+        return [crop for _, crop in self._candidates.get(track_id, [])]
 
     def get(self, track_id: int) -> np.ndarray | None:
-        entry = self._best.get(track_id)
-        return entry[1] if entry is not None else None
+        crops = self.get_all(track_id)
+        return crops[0] if crops else None
 
     def remove(self, track_id: int) -> None:
-        self._best.pop(track_id, None)
+        self._candidates.pop(track_id, None)
 
 
 def get_event_type(line_name: str) -> str:
@@ -389,8 +397,8 @@ def handle_passages(
 
             snapshot_path = None
             if SAVE_SNAPSHOTS:
-                best_crop = (
-                    best_crop_tracker.get(object_id)
+                best_crops = (
+                    best_crop_tracker.get_all(object_id)
                     if best_crop_tracker is not None
                     else None
                 )
@@ -400,7 +408,7 @@ def handle_passages(
                     obj=obj,
                     line_name=line_name,
                     direction=direction,
-                    best_crop=best_crop,
+                    best_crops=best_crops,
                 )
 
             db.insert_event(
