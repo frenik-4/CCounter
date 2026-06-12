@@ -32,7 +32,7 @@ from src.ccounter.database import Database
 from src.ccounter.tracker import CentroidTracker
 from src.ccounter.counter import MultiLineCounter
 from src.ccounter.classifier import classify_object
-from src.ccounter.config import ANPR_MIN_BBOX_WIDTH
+from src.ccounter.config import ANPR_MIN_BBOX_WIDTH, PLATE_CAPTURE_Y, PLATE_CAPTURE_Y_TOLERANCE
 
 
 # Testa senare igen när ethernet är inkopplat.
@@ -297,9 +297,12 @@ class BestCropTracker:
     MIN_BBOX_WIDTH = ANPR_MIN_BBOX_WIDTH
 
     TOP_N = 5
+    CAPTURE_Y = PLATE_CAPTURE_Y
+    CAPTURE_Y_TOLERANCE = PLATE_CAPTURE_Y_TOLERANCE
 
     def __init__(self) -> None:
         self._candidates: dict[int, list[tuple[float, np.ndarray]]] = {}
+        self._y_triggered: set[int] = set()
 
     def update(self, track_id: int, frame, bbox: tuple[int, int, int, int]) -> None:
         x1, y1, x2, y2 = bbox
@@ -343,6 +346,17 @@ class BestCropTracker:
         gray_clipped = np.clip(gray, 0, 180)
         sharpness = float(cv2.Laplacian(gray_clipped, cv2.CV_64F).var())
 
+        # Positionsbaserad trigger: om fordonet är på optimal Y-position
+        # får framen maxprioritet och hamnar alltid först i top-N.
+        center_y = (y1 + y2) // 2
+        if (
+            self.CAPTURE_Y > 0
+            and track_id not in self._y_triggered
+            and abs(center_y - self.CAPTURE_Y) <= self.CAPTURE_Y_TOLERANCE
+        ):
+            self._y_triggered.add(track_id)
+            sharpness = 1e9
+
         candidates = self._candidates.setdefault(track_id, [])
         candidates.append((sharpness, crop.copy()))
         candidates.sort(key=lambda x: -x[0])
@@ -358,6 +372,7 @@ class BestCropTracker:
 
     def remove(self, track_id: int) -> None:
         self._candidates.pop(track_id, None)
+        self._y_triggered.discard(track_id)
 
 
 def get_event_type(line_name: str) -> str:

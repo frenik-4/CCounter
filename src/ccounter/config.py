@@ -153,6 +153,13 @@ EXPORT_MAX_DAYS = int(os.getenv("EXPORT_MAX_DAYS", "60"))
 # Sänk om kameran är monterad längre bort, höj om fordon syns tidigt men delvis.
 ANPR_MIN_BBOX_WIDTH = int(os.getenv("ANPR_MIN_BBOX_WIDTH", "350"))
 
+# Y-koordinat (px) där ett fordon befinner sig i optimal position för skyltläsning.
+# Sätt till 0 för att inaktivera. Vid 4K (2160 px) är t.ex. 1400 ca 65 % från toppen.
+# Hitta rätt värde: öppna en snapshot i ett bildvisningsprogram som visar koordinater,
+# och notera Y-värdet när skylten är centrerad och tydlig.
+PLATE_CAPTURE_Y = int(os.getenv("PLATE_CAPTURE_Y", "0"))
+PLATE_CAPTURE_Y_TOLERANCE = int(os.getenv("PLATE_CAPTURE_Y_TOLERANCE", "80"))
+
 PLATE_MIN_CONFIDENCE = float(os.getenv("PLATE_MIN_CONFIDENCE", "0.30"))
 PLATE_READER_GPU = get_bool("PLATE_READER_GPU", False)
 PLATE_READER_SHARPNESS_THRESHOLD = float(os.getenv("PLATE_READER_SHARPNESS_THRESHOLD", "80.0"))
