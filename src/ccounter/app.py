@@ -33,6 +33,7 @@ from src.ccounter.tracker import CentroidTracker
 from src.ccounter.counter import MultiLineCounter
 from src.ccounter.classifier import classify_object
 from src.ccounter.config import ANPR_MIN_BBOX_WIDTH, PLATE_CAPTURE_Y, PLATE_CAPTURE_Y_TOLERANCE
+from src.ccounter.ov_detector import OVDetector
 
 
 # Testa senare igen när ethernet är inkopplat.
@@ -66,48 +67,38 @@ def point_inside_zone(point: tuple[int, int]) -> bool:
     return result >= 0
 
 
-def detect_vehicles(model: YOLO, frame) -> list[dict]:
-    results = model(
-        frame,
-        verbose=False,
-        conf=CONFIDENCE_THRESHOLD,
-    )
+def detect_vehicles(model, frame) -> list[dict]:
+    if isinstance(model, OVDetector):
+        raw = model(frame, conf=CONFIDENCE_THRESHOLD)
+    else:
+        raw = []
+        for result in model(frame, verbose=False, conf=CONFIDENCE_THRESHOLD):
+            for box in result.boxes:
+                x1, y1, x2, y2 = [int(v) for v in box.xyxy[0].tolist()]
+                raw.append({
+                    "class_id":   int(box.cls[0]),
+                    "class_name": model.names[int(box.cls[0])],
+                    "confidence": float(box.conf[0]),
+                    "bbox":       (x1, y1, x2, y2),
+                    "center":     ((x1 + x2) // 2, (y1 + y2) // 2),
+                })
 
     detections = []
+    for det in raw:
+        class_id = det["class_id"]
+        center = det["center"]
 
-    for result in results:
-        for box in result.boxes:
-            class_id = int(box.cls[0])
-            confidence = float(box.conf[0])
-            class_name = model.names[class_id]
+        if class_id not in DETECTION_CLASSES:
+            if DETECTION_DEBUG:
+                print(f"DEBUG skip fel_klass: {det['class_name']} (id={class_id}) conf={det['confidence']:.2f} center={center}")
+            continue
 
-            x1, y1, x2, y2 = box.xyxy[0].tolist()
-            x1, y1, x2, y2 = int(x1), int(y1), int(x2), int(y2)
-            center_x = int((x1 + x2) / 2)
-            center_y = int((y1 + y2) / 2)
-            center = (center_x, center_y)
+        if not point_inside_zone(center):
+            if DETECTION_DEBUG:
+                print(f"DEBUG skip utanfor_zon: {det['class_name']} conf={det['confidence']:.2f} center={center}")
+            continue
 
-            if class_id not in DETECTION_CLASSES:
-                if DETECTION_DEBUG:
-                    print(f"DEBUG skip fel_klass: {class_name} (id={class_id}) conf={confidence:.2f} center=({center_x},{center_y})")
-                continue
-
-            in_zone = point_inside_zone(center)
-
-            if not in_zone:
-                if DETECTION_DEBUG:
-                    print(f"DEBUG skip utanfor_zon: {class_name} conf={confidence:.2f} center=({center_x},{center_y})")
-                continue
-
-            detections.append(
-                {
-                    "class_id": class_id,
-                    "class_name": class_name,
-                    "confidence": confidence,
-                    "bbox": (x1, y1, x2, y2),
-                    "center": center,
-                }
-            )
+        detections.append(det)
 
     return detections
 
@@ -480,8 +471,11 @@ def main() -> None:
     print(f"Old count line: {COUNT_LINE}")
     print(f"Lines: {LINES}")
 
-    model = YOLO(YOLO_MODEL)
-    print("YOLO-modell laddad.")
+    if YOLO_MODEL.rstrip("/").endswith("_openvino_model"):
+        model = OVDetector(YOLO_MODEL, device="GPU", conf=CONFIDENCE_THRESHOLD)
+    else:
+        model = YOLO(YOLO_MODEL)
+    print("Modell laddad.")
 
     db = Database(DATABASE_PATH)
 
@@ -494,6 +488,7 @@ def main() -> None:
     best_crop_tracker = BestCropTracker()
 
     cap = open_stream(RTSP_URL)
+    db.log_stream_event("up")
 
     frame_count = 0
     start_time = time.time()
@@ -503,6 +498,7 @@ def main() -> None:
             ret, frame = cap.read()
 
             if not ret or frame is None:
+                db.log_stream_event("down")
                 cap.release()
                 cap = None
                 while cap is None:
@@ -510,6 +506,7 @@ def main() -> None:
                     time.sleep(5)
                     try:
                         cap = open_stream(RTSP_URL)
+                        db.log_stream_event("up")
                     except Exception as exc:
                         print(f"Ateranslutning misslyckades: {exc}")
                 continue
@@ -584,6 +581,10 @@ def main() -> None:
                     break
 
     finally:
+        try:
+            db.log_stream_event("down")
+        except Exception:
+            pass
         cap.release()
         db.close()
         cv2.destroyAllWindows()

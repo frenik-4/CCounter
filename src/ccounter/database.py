@@ -110,6 +110,24 @@ class Database:
             """
         )
 
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS stream_events (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp TEXT NOT NULL,
+                status TEXT NOT NULL
+            );
+            """
+        )
+
+        self.conn.commit()
+
+    def log_stream_event(self, status: str) -> None:
+        now = datetime.now().isoformat(timespec="seconds")
+        self.conn.execute(
+            "INSERT INTO stream_events (timestamp, status) VALUES (?, ?);",
+            (now, status),
+        )
         self.conn.commit()
 
     def insert_event(

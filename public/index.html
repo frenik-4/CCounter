@@ -4,6 +4,7 @@
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
   <title>CCounter Trafikstatistik</title>
+  <script src="https://cdn.sheetjs.com/xlsx-latest/package/dist/xlsx.full.min.js"></script>
 
   <style>
     :root {
@@ -241,7 +242,7 @@
       padding: 12px 0;
     }
 
-    /* Dygnsgraf (staplar med riktning) */
+    /* Dygnsgraf */
     .chart-wrap {
       overflow-x: auto;
       padding-top: 8px;
@@ -342,7 +343,7 @@
       align-items: flex-end;
       border-left: 1px solid var(--border);
       border-bottom: 1px solid var(--border);
-      padding: 12px 8px 32px 8px;
+      padding: 12px 8px 54px 8px;
       position: relative;
     }
 
@@ -381,23 +382,148 @@
       font-size: 11px;
       color: var(--text);
       min-height: 14px;
+      display: flex;
+      align-items: center;
+      gap: 3px;
+      justify-content: center;
     }
 
     .week-bar-label {
       position: absolute;
-      bottom: -24px;
+      bottom: -46px;
       font-size: 11px;
       color: var(--muted);
       white-space: nowrap;
+      text-align: center;
+      line-height: 1.4;
     }
 
     .week-bar-wrap.active .week-bar-label { color: var(--amber); font-weight: 700; }
+
+    /* Uptime-dot */
+    .uptime-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
+      display: inline-block;
+    }
+    .uptime-ok   { background: var(--green); }
+    .uptime-warn { background: var(--amber); }
+    .uptime-bad  { background: #ef4444; }
+    .uptime-none { background: var(--gray); opacity: 0.5; }
 
     .week-note {
       font-size: 12px;
       color: var(--muted);
       margin: 10px 0 0;
     }
+
+    /* Veckodag-snitt-graf */
+    .wd-chart-wrap {
+      overflow-x: auto;
+      padding-top: 4px;
+    }
+
+    .wd-chart {
+      min-width: 300px;
+      height: 120px;
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      align-items: flex-end;
+      border-left: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+      padding: 12px 8px 58px 8px;
+      position: relative;
+    }
+
+    .wd-bar-wrap {
+      height: 100%;
+      display: flex;
+      flex-direction: column;
+      justify-content: flex-end;
+      align-items: center;
+      gap: 4px;
+      position: relative;
+    }
+
+    .wd-bar-value {
+      font-size: 11px;
+      color: var(--text);
+      min-height: 14px;
+      text-align: center;
+    }
+
+    .wd-bar {
+      width: 100%;
+      max-width: 44px;
+      min-height: 3px;
+      border-radius: 6px 6px 0 0;
+      background: linear-gradient(180deg, #818cf8, #6366f1);
+    }
+
+    .wd-bar-label {
+      position: absolute;
+      bottom: -50px;
+      font-size: 11px;
+      color: var(--muted);
+      text-align: center;
+      line-height: 1.5;
+      white-space: nowrap;
+    }
+
+    /* Excel-export */
+    .export-controls {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 14px;
+      align-items: center;
+      margin: 12px 0 8px;
+    }
+
+    .export-row {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+    }
+
+    .export-label {
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .export-input {
+      background: var(--card-soft);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 10px;
+      font-size: 14px;
+    }
+
+    .export-check {
+      display: flex;
+      gap: 8px;
+      align-items: center;
+      color: var(--muted);
+      font-size: 14px;
+      cursor: pointer;
+    }
+
+    .export-btn {
+      background: var(--accent);
+      color: #0f172a;
+      border: none;
+      border-radius: 10px;
+      padding: 10px 18px;
+      font-size: 14px;
+      font-weight: 700;
+      cursor: pointer;
+      transition: opacity 0.15s;
+    }
+
+    .export-btn:hover { opacity: 0.85; }
 
     .footer {
       margin-top: 28px;
@@ -502,7 +628,21 @@
       <div class="week-chart-wrap">
         <div id="weekChart" class="week-chart"></div>
       </div>
+      <div class="chart-legend" style="margin-top:14px">
+        <div class="legend-item"><span class="uptime-dot uptime-ok"></span> &ge;95% uptime</div>
+        <div class="legend-item"><span class="uptime-dot uptime-warn"></span> 50–94%</div>
+        <div class="legend-item"><span class="uptime-dot uptime-bad"></span> &lt;50%</div>
+        <div class="legend-item"><span class="uptime-dot uptime-none"></span> Ingen mätning</div>
+      </div>
       <p class="week-note">Klicka på en dag för att visa detaljer.</p>
+    </section>
+
+    <section class="card section">
+      <h2>Snitt per veckodag</h2>
+      <div class="wd-chart-wrap">
+        <div id="wdChart" class="wd-chart"></div>
+      </div>
+      <p class="week-note">Motorfordon. Bara dagar med minst 95% kameraupptid (06–22) räknas.</p>
     </section>
 
     <section class="card section">
@@ -534,6 +674,26 @@
     <section class="card section">
       <h2>Timmar och händelser</h2>
       <div id="hourList" class="hour-list"></div>
+    </section>
+
+    <section class="card section">
+      <h2>Ladda ner data</h2>
+      <div class="export-controls">
+        <div class="export-row">
+          <label class="export-label" for="exportStart">Från</label>
+          <input type="date" id="exportStart" class="export-input" />
+        </div>
+        <div class="export-row">
+          <label class="export-label" for="exportEnd">Till</label>
+          <input type="date" id="exportEnd" class="export-input" />
+        </div>
+        <label class="export-check">
+          <input type="checkbox" id="includeUnknownUptime" />
+          Inkludera dagar utan uptimemätning
+        </label>
+        <button class="export-btn" onclick="downloadExcel()">Ladda ner Excel</button>
+      </div>
+      <p class="week-note">Motorfordon (bil, lastbil, buss, mc). Filtrera på Uptime %-kolumnen i Excel för att sätta din egen gräns.</p>
     </section>
 
     <div class="footer">***</div>
@@ -572,6 +732,9 @@
       cow:        "Ko",
       sheep:      "Får",
     };
+
+    const WEEKDAY_SHORT = ["Sön", "Mån", "Tis", "Ons", "Tor", "Fre", "Lör"];
+    const WEEKDAY_LONG  = ["Söndag", "Måndag", "Tisdag", "Onsdag", "Torsdag", "Fredag", "Lördag"];
 
     function translateCategory(cat) {
       return CATEGORY_LABELS[cat] || cat || "–";
@@ -646,11 +809,20 @@
     function updateStatus(stats) {
       const el = document.getElementById("status");
       if (!el) return;
-      const text = formatStaleness(stats.generated_at);
-      el.textContent = text;
+      el.textContent = formatStaleness(stats.generated_at);
       const stale = stats.generated_at
         && (Date.now() - new Date(stats.generated_at).getTime()) > 2 * 60 * 60 * 1000;
       el.classList.toggle("stale", stale);
+    }
+
+    function uptimeDotHtml(pct) {
+      if (pct === null || pct === undefined) {
+        return '<span class="uptime-dot uptime-none" title="Ingen uptimemätning"></span>';
+      }
+      const p = Math.round(pct * 100);
+      if (pct >= 0.95) return `<span class="uptime-dot uptime-ok"   title="${p}% uptime (06–22)"></span>`;
+      if (pct >= 0.50) return `<span class="uptime-dot uptime-warn"  title="${p}% uptime (06–22)"></span>`;
+      return                   `<span class="uptime-dot uptime-bad"   title="${p}% uptime (06–22)"></span>`;
     }
 
     // ── Datumväljare ─────────────────────────────────────────────────────────
@@ -660,13 +832,14 @@
       const prev = select.value;
       select.innerHTML = "";
 
-      const dates = stats.available_dates
-        || Object.keys(stats.days || {}).sort();
+      const dates = stats.available_dates || Object.keys(stats.days || {}).sort();
 
       for (const date of dates) {
+        const d = new Date(date + "T12:00:00");
+        const wd = WEEKDAY_SHORT[d.getDay()];
         const opt = document.createElement("option");
         opt.value = date;
-        opt.textContent = date;
+        opt.textContent = `${wd} ${date}`;
         select.appendChild(opt);
       }
 
@@ -676,9 +849,18 @@
         select.value = dates[dates.length - 1];
       }
 
-      select.addEventListener("change", () => {
-        renderDay(select.value);
-      });
+      select.addEventListener("change", () => renderDay(select.value));
+    }
+
+    function setupExportDates(stats) {
+      const dates = stats.available_dates || [];
+      if (dates.length === 0) return;
+      const startEl = document.getElementById("exportStart");
+      const endEl   = document.getElementById("exportEnd");
+      if (startEl && !startEl.value) startEl.value = dates[0];
+      if (endEl   && !endEl.value)   endEl.value   = dates[dates.length - 1];
+      if (startEl) { startEl.min = dates[0]; startEl.max = dates[dates.length - 1]; }
+      if (endEl)   { endEl.min   = dates[0]; endEl.max   = dates[dates.length - 1]; }
     }
 
     // ── Veckograf ────────────────────────────────────────────────────────────
@@ -696,25 +878,30 @@
 
       const counts = dates.map(d => {
         const day = stats.days?.[d];
-        return { date: d, total: day ? (day.road_traffic || 0) + (day.other || 0) : 0 };
+        return {
+          date: d,
+          total: day ? (day.road_traffic || 0) + (day.other || 0) : 0,
+          uptime: day?.uptime_pct ?? null,
+        };
       });
 
       const max = Math.max(...counts.map(c => c.total), 1);
 
-      for (const { date, total } of counts) {
+      for (const { date, total, uptime } of counts) {
         const pct = total > 0 ? Math.max((total / max) * 100, 5) : 0;
         const isActive = date === currentDate;
+
+        const d = new Date(date + "T12:00:00");
+        const wd = WEEKDAY_SHORT[d.getDay()];
+        const dateShort = date.slice(5).replace("-", "/");
 
         const wrap = document.createElement("div");
         wrap.className = "week-bar-wrap" + (isActive ? " active" : "");
 
-        // Visa bara MM-DD i etiketten
-        const label = date.length >= 7 ? date.slice(5) : date;
-
         wrap.innerHTML = `
-          <div class="week-bar-value">${total > 0 ? total : ""}</div>
+          <div class="week-bar-value">${uptimeDotHtml(uptime)}${total > 0 ? total : ""}</div>
           <div class="week-bar" style="height: ${pct}%"></div>
-          <div class="week-bar-label">${label}</div>
+          <div class="week-bar-label">${wd}<br>${dateShort}</div>
         `;
 
         wrap.addEventListener("click", () => {
@@ -724,6 +911,37 @@
 
         container.appendChild(wrap);
       }
+    }
+
+    // ── Snitt per veckodag ───────────────────────────────────────────────────
+
+    function renderWeekdayAverages(weekdayAverages) {
+      const container = document.getElementById("wdChart");
+      if (!container || !weekdayAverages) return;
+      container.innerHTML = "";
+
+      const SHORT_WD = ["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"];
+      const values = weekdayAverages.map(w => w.avg_road_traffic ?? 0);
+      const max = Math.max(...values, 1);
+
+      weekdayAverages.forEach((w, i) => {
+        const val = w.avg_road_traffic;
+        const pct = val ? Math.max((val / max) * 100, 5) : 0;
+        const n = w.avg_road_north !== null ? w.avg_road_north : "–";
+        const s = w.avg_road_south !== null ? w.avg_road_south : "–";
+        const days = w.days_included;
+        const title = `${w.weekday}\nSnitt: ${val ?? "–"} fordon\nNorrut: ${n} | Söderut: ${s}\n(${days} dag${days !== 1 ? "ar" : ""})`;
+
+        const wrap = document.createElement("div");
+        wrap.className = "wd-bar-wrap";
+        wrap.title = title;
+        wrap.innerHTML = `
+          <div class="wd-bar-value">${val !== null ? Math.round(val) : ""}</div>
+          <div class="wd-bar" style="height: ${pct}%"></div>
+          <div class="wd-bar-label">${SHORT_WD[i]}<br><span style="color:var(--gray);font-size:10px">${days}d</span></div>
+        `;
+        container.appendChild(wrap);
+      });
     }
 
     // ── Kategorigrafen ────────────────────────────────────────────────────────
@@ -742,7 +960,6 @@
         return;
       }
 
-      // Sortera fallande
       filtered.sort(([, a], [, b]) => b - a);
 
       for (const [name, count] of filtered) {
@@ -760,13 +977,12 @@
       }
     }
 
-    // ── Dygnsgraf (staplade riktningsstaplar) ─────────────────────────────────
+    // ── Dygnsgraf ─────────────────────────────────────────────────────────────
 
     function renderHourChart(hours) {
       const container = document.getElementById("hourChart");
       container.innerHTML = "";
 
-      // Räkna riktningar per timme ur events-arrayen
       const data = {};
       for (let i = 0; i < 24; i++) {
         data[i] = { south: 0, north: 0, other: 0 };
@@ -780,7 +996,6 @@
           else if (ev.direction === "B_TO_A") data[h].north++;
           else                                data[h].other++;
         }
-        // Lägg till övrigt-händelser som saknar riktning (ex cykel utan direction)
         const evTotal = (hour.events || []).length;
         const hourTotal = (hour.road_traffic || 0) + (hour.other || 0);
         if (hourTotal > evTotal) {
@@ -874,7 +1089,6 @@
               <div>Riktning</div>
             </div>
           `;
-
           for (const event of visibleEvents) {
             const row = document.createElement("div");
             row.className = "event-row";
@@ -933,7 +1147,6 @@
       setText("dirSouth", day.dir_south ?? 0);
       setText("dirNorth", day.dir_north ?? 0);
 
-      // Topptimme
       const peak = getPeakHour(day.hours || []);
       if (peak && peak.total > 0) {
         const hourStart = parseHourStart(peak.hour);
@@ -950,6 +1163,52 @@
       renderHourList(day.hours || []);
     }
 
+    // ── Excel-export ──────────────────────────────────────────────────────────
+
+    function downloadExcel() {
+      if (!allStats) return;
+
+      const startDate = document.getElementById("exportStart").value;
+      const endDate   = document.getElementById("exportEnd").value;
+      const includeUnknown = document.getElementById("includeUnknownUptime").checked;
+
+      if (!startDate || !endDate || startDate > endDate) {
+        alert("Välj ett giltigt datumintervall.");
+        return;
+      }
+
+      const rows = [["Veckodag", "Datum", "Norrut", "Söderut", "Uptime %"]];
+
+      const dates = (allStats.available_dates || []).filter(d => d >= startDate && d <= endDate);
+
+      for (const date of dates) {
+        const day = allStats.days?.[date];
+        if (!day) continue;
+
+        const uptime = day.uptime_pct;
+        if ((uptime === null || uptime === undefined) && !includeUnknown) continue;
+
+        const d = new Date(date + "T12:00:00");
+        const weekday = WEEKDAY_LONG[d.getDay()];
+        const uptimePct = uptime !== null && uptime !== undefined
+          ? Math.round(uptime * 1000) / 10
+          : "";
+        rows.push([weekday, date, day.road_dir_north ?? 0, day.road_dir_south ?? 0, uptimePct]);
+      }
+
+      if (rows.length <= 1) {
+        alert("Inga dagar matchar dina urvalskriterier.\n\nTips: kryssa i 'Inkludera dagar utan uptimemätning' för äldre data.");
+        return;
+      }
+
+      const ws = XLSX.utils.aoa_to_sheet(rows);
+      ws["!cols"] = [{ wch: 12 }, { wch: 12 }, { wch: 10 }, { wch: 10 }, { wch: 10 }];
+
+      const wb = XLSX.utils.book_new();
+      XLSX.utils.book_append_sheet(wb, ws, "Trafikdata");
+      XLSX.writeFile(wb, `trafikdata_${startDate}_${endDate}.xlsx`);
+    }
+
     // ── Auto-refresh ──────────────────────────────────────────────────────────
 
     let lastGeneratedAt = null;
@@ -963,10 +1222,12 @@
           const select = document.getElementById("dateSelect");
           const currentDate = select.value;
           setupDateSelect(stats);
+          setupExportDates(stats);
           select.value = currentDate && stats.days?.[currentDate]
             ? currentDate
             : select.value;
           renderDay(select.value);
+          renderWeekdayAverages(stats.weekday_averages);
         }
         updateStatus(stats);
       } catch (e) {
@@ -974,12 +1235,7 @@
       }
     }
 
-    // Uppdatera staleness-indikatorn var 60:e sekund utan ny fetch
-    setInterval(() => {
-      if (allStats) updateStatus(allStats);
-    }, 60_000);
-
-    // Försök hämta ny data var 15:e minut
+    setInterval(() => { if (allStats) updateStatus(allStats); }, 60_000);
     setInterval(checkForUpdates, 15 * 60 * 1000);
 
     // ── Start ─────────────────────────────────────────────────────────────────
@@ -990,9 +1246,11 @@
         lastGeneratedAt = allStats.generated_at;
 
         setupDateSelect(allStats);
+        setupExportDates(allStats);
 
         const select = document.getElementById("dateSelect");
         renderDay(select.value);
+        renderWeekdayAverages(allStats.weekday_averages);
         updateStatus(allStats);
       } catch (error) {
         document.getElementById("status").textContent = "Kunde inte läsa statistik";
