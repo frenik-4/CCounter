@@ -107,8 +107,8 @@ class OVDetector:
                     "class_id":   int(cls_id),
                     "class_name": self.names.get(int(cls_id), str(cls_id)),
                     "confidence": float(confidences[m][i]),
-                    "bbox":       (bx1, by1, bx2, by2),
-                    "center":     ((bx1 + bx2) // 2, (by1 + by2) // 2),
+                    "bbox":       (int(bx1), int(by1), int(bx2), int(by2)),
+                    "center":     (int((bx1 + bx2) // 2), int((by1 + by2) // 2)),
                 })
 
         return detections
