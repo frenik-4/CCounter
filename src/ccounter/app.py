@@ -1,3 +1,4 @@
+import json
 import os
 import queue
 import threading
@@ -662,6 +663,17 @@ def main() -> None:
                     f"Tracks: {active_tracks} | "
                     f"Events totalt: {db.count_events()}"
                 )
+
+                status_path = os.path.join(os.path.dirname(DATABASE_PATH), "status.json")
+                try:
+                    with open(status_path, "w") as f:
+                        json.dump({
+                            "fps": round(fps, 1),
+                            "stream": "up",
+                            "updated_at": datetime.now().isoformat(timespec="seconds"),
+                        }, f)
+                except Exception:
+                    pass
 
             if SHOW_WINDOW:
                 draw_detection_zone(frame)
