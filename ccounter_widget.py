@@ -5,6 +5,7 @@ Körs fristående: python3 /home/lucky9/CCounter/ccounter_widget.py
 """
 
 import json
+import os
 import sqlite3
 from datetime import date, datetime, timedelta
 
@@ -12,10 +13,10 @@ import gi
 gi.require_version("Gtk", "3.0")
 from gi.repository import Gtk, GLib, Gdk
 
-DB_PATH     = "/home/lucky9/CCounter/data/ccounter.db"
-STATUS_PATH = "/home/lucky9/CCounter/data/status.json"
-REFRESH_SECONDS = 10
-# Status anses "gammal" om den inte uppdaterats inom detta antal sekunder
+DB_PATH       = "/home/lucky9/CCounter/data/ccounter.db"
+STATUS_PATH   = "/home/lucky9/CCounter/data/status.json"
+POS_PATH      = os.path.expanduser("~/.config/ccounter_widget_pos.json")
+REFRESH_SECONDS      = 10
 STATUS_STALE_SECONDS = 30
 
 BG       = "#0f172a"
@@ -127,6 +128,15 @@ class Widget(Gtk.Window):
         self.stick()
 
         self.connect("button-press-event", self._on_press)
+        self.connect("configure-event", self._on_configure)
+
+        # Återställ sparad position
+        try:
+            with open(POS_PATH) as f:
+                pos = json.load(f)
+            self.move(pos["x"], pos["y"])
+        except Exception:
+            self.move(40, 40)
 
         screen = self.get_screen()
         visual = screen.get_rgba_visual()
@@ -276,6 +286,14 @@ class Widget(Gtk.Window):
     def _on_press(self, widget, event):
         if event.button == 1:
             self.begin_move_drag(event.button, int(event.x_root), int(event.y_root), event.time)
+
+    def _on_configure(self, widget, event):
+        try:
+            os.makedirs(os.path.dirname(POS_PATH), exist_ok=True)
+            with open(POS_PATH, "w") as f:
+                json.dump({"x": event.x, "y": event.y}, f)
+        except Exception:
+            pass
 
     def refresh(self):
         count, uptime_pct, plates = query_db()
