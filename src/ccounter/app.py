@@ -1,4 +1,6 @@
 import os
+import queue
+import threading
 import time
 from datetime import datetime
 
@@ -27,6 +29,9 @@ from src.ccounter.config import (
     DISPLAY_SCALE,
     PROCESS_EVERY_N_FRAMES,
     DETECTION_DEBUG,
+    PLATE_MIN_CONFIDENCE,
+    PLATE_READER_GPU,
+    PLATE_READER_SHARPNESS_THRESHOLD,
 )
 from src.ccounter.database import Database
 from src.ccounter.tracker import CentroidTracker
@@ -34,6 +39,8 @@ from src.ccounter.counter import MultiLineCounter
 from src.ccounter.classifier import classify_object
 from src.ccounter.config import ANPR_MIN_BBOX_WIDTH, PLATE_CAPTURE_Y, PLATE_CAPTURE_Y_TOLERANCE
 from src.ccounter.ov_detector import OVDetector
+from src.ccounter.plate_reader import PlateReader
+from src.ccounter.track_plate_manager import TrackPlateManager, PlateCandidate
 
 
 # Testa senare igen när ethernet är inkopplat.
@@ -366,6 +373,87 @@ class BestCropTracker:
         self._y_triggered.discard(track_id)
 
 
+class PlateOCRWorker:
+    """
+    Kör EasyOCR i en bakgrundstråd så att OCR-anrop (1–3 s) inte blockerar
+    huvudloopen. Main-tråden croppar fordonet och lägger i kö; bakgrunds-
+    tråden kör skärpekontroll, OCR och röstning per track_id.
+    """
+
+    def __init__(self) -> None:
+        print("Laddar EasyOCR för live-skyltläsning...")
+        self._reader = PlateReader(gpu=PLATE_READER_GPU)
+        self._min_conf = PLATE_MIN_CONFIDENCE
+        self._sharpness_threshold = PLATE_READER_SHARPNESS_THRESHOLD
+        self._candidates: dict[int, PlateCandidate] = {}
+        self._lock = threading.Lock()
+        # Kö med max 40 crops — droppa om tråden hänger efter.
+        self._q: queue.Queue = queue.Queue(maxsize=40)
+        self._thread = threading.Thread(target=self._run, daemon=True, name="plate-ocr")
+        self._thread.start()
+        print("EasyOCR-tråd startad.")
+
+    def submit(self, track_id: int, frame, bbox: tuple[int, int, int, int]) -> None:
+        """Croppar fordon och lägger i kö. Droppar tyst om kön är full."""
+        fh, fw = frame.shape[:2]
+        x1, y1, x2, y2 = bbox
+        h = y2 - y1
+        plate_y1 = max(0, y1 + int(h * 0.20))
+        plate_y2 = min(fh, y1 + int(h * 0.80))
+        pad_x = int((x2 - x1) * 0.05)
+        cx1, cx2 = max(0, x1 - pad_x), min(fw, x2 + pad_x)
+        if cx2 <= cx1 or plate_y2 <= plate_y1:
+            return
+        crop = frame[plate_y1:plate_y2, cx1:cx2].copy()
+        try:
+            self._q.put_nowait((track_id, crop))
+        except queue.Full:
+            pass
+
+    def get_best_plate(self, track_id: int) -> PlateCandidate | None:
+        with self._lock:
+            return self._candidates.get(track_id)
+
+    def remove(self, track_id: int) -> None:
+        with self._lock:
+            self._candidates.pop(track_id, None)
+
+    def _run(self) -> None:
+        while True:
+            track_id, crop = self._q.get()
+            try:
+                gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
+                if float(cv2.Laplacian(gray, cv2.CV_64F).var()) < self._sharpness_threshold:
+                    continue
+                result = self._reader.read_plate_from_image_array(crop)
+                if not result["plate_found"]:
+                    continue
+                plate_text = result["plate_text"]
+                confidence = float(result["confidence"])
+                if confidence < self._min_conf:
+                    continue
+                with self._lock:
+                    candidate = self._candidates.get(track_id)
+                    if candidate is None:
+                        candidate = PlateCandidate(last_checked_at=time.time(), best_crop=crop)
+                        self._candidates[track_id] = candidate
+                    if plate_text not in candidate.votes:
+                        candidate.votes[plate_text] = [0, 0.0]
+                    candidate.votes[plate_text][0] += 1
+                    if confidence > candidate.votes[plate_text][1]:
+                        candidate.votes[plate_text][1] = confidence
+                    if confidence > candidate.confidence:
+                        candidate.best_crop = crop
+                print(
+                    f"ANPR live: track={track_id} skylt={plate_text} "
+                    f"konf={confidence:.2f} röster={candidate.votes[plate_text][0]}"
+                )
+            except Exception as exc:
+                print(f"PlateOCRWorker fel: {exc}")
+            finally:
+                self._q.task_done()
+
+
 def get_event_type(line_name: str) -> str:
     if line_name == "parking_entry_line":
         return "parking_entry"
@@ -381,6 +469,7 @@ def handle_passages(
     tracked_objects: dict[int, dict],
     line_counter: MultiLineCounter,
     best_crop_tracker: "BestCropTracker | None" = None,
+    plate_ocr_worker: "PlateOCRWorker | None" = None,
 ) -> None:
     for object_id, obj in tracked_objects.items():
         if obj.get("missing", 0) > 0:
@@ -400,6 +489,15 @@ def handle_passages(
                 object_class=obj["class_name"],
                 line_name=line_name,
             )
+
+            # Hämta bästa skyltläsning från live-OCR-tråden.
+            plate_text = None
+            plate_confidence = 0.0
+            if plate_ocr_worker is not None:
+                candidate = plate_ocr_worker.get_best_plate(object_id)
+                if candidate is not None and candidate.plate_text is not None:
+                    plate_text = candidate.plate_text
+                    plate_confidence = candidate.confidence
 
             snapshot_path = None
             if SAVE_SNAPSHOTS:
@@ -429,10 +527,13 @@ def handle_passages(
                 bbox=obj["bbox"],
                 center=obj["center"],
                 snapshot_path=snapshot_path,
-                plate_detected=False,
+                plate_detected=plate_text is not None,
+                plate_text=plate_text,
+                plate_confidence=plate_confidence,
             )
 
             total = db.count_events()
+            plate_info = f" | skylt={plate_text} ({plate_confidence:.2f})" if plate_text else ""
             print(
                 "EVENT: "
                 f"id={object_id} | "
@@ -444,6 +545,7 @@ def handle_passages(
                 f"confidence={obj['confidence']:.2f} | "
                 f"total={total} | "
                 f"snapshot={snapshot_path}"
+                f"{plate_info}"
             )
 
 def reconnect(rtsp_url: str, delay_seconds: int = 5) -> cv2.VideoCapture:
@@ -486,6 +588,7 @@ def main() -> None:
 
     line_counter = MultiLineCounter(LINES)
     best_crop_tracker = BestCropTracker()
+    plate_ocr_worker = PlateOCRWorker()
 
     cap = open_stream(RTSP_URL)
     db.log_stream_event("up")
@@ -520,17 +623,19 @@ def main() -> None:
             old_ids = set(tracker.objects.keys())
             tracked_objects = tracker.update(detections)
 
-            # Uppdatera BestCropTracker med skärpaste crop per fordon
+            # Uppdatera BestCropTracker och live-OCR per fordon
             for object_id, obj in tracked_objects.items():
                 if obj.get("missing", 0) > 0:
                     continue
                 if obj["class_name"] not in BestCropTracker.VEHICLE_CLASSES:
                     continue
                 best_crop_tracker.update(object_id, frame, obj["bbox"])
+                plate_ocr_worker.submit(object_id, frame, obj["bbox"])
 
             # Rensa IDs som försvunnit ur trackern
             for removed_id in old_ids - set(tracked_objects.keys()):
                 best_crop_tracker.remove(removed_id)
+                plate_ocr_worker.remove(removed_id)
 
             handle_passages(
                 db=db,
@@ -538,6 +643,7 @@ def main() -> None:
                 tracked_objects=tracked_objects,
                 line_counter=line_counter,
                 best_crop_tracker=best_crop_tracker,
+                plate_ocr_worker=plate_ocr_worker,
             )
 
             if frame_count % 150 == 0:
