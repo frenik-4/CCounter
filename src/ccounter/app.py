@@ -577,7 +577,11 @@ def main() -> None:
     if YOLO_MODEL.rstrip("/").endswith("_openvino_model"):
         model = OVDetector(YOLO_MODEL, device="GPU", conf=CONFIDENCE_THRESHOLD)
     else:
+        import torch
+        yolo_device = "cuda" if torch.cuda.is_available() else "cpu"
+        print(f"YOLO device: {yolo_device}")
         model = YOLO(YOLO_MODEL)
+        model.to(yolo_device)
     print("Modell laddad.")
 
     db = Database(DATABASE_PATH)
