@@ -241,7 +241,6 @@ def save_passage_snapshot(
     obj: dict,
     line_name: str,
     direction: str,
-    best_crops: list[np.ndarray] | None = None,
 ) -> str:
     os.makedirs(SNAPSHOT_DIR, exist_ok=True)
 
@@ -256,31 +255,10 @@ def save_passage_snapshot(
 
     snapshot_path = os.path.join(SNAPSHOT_DIR, filename)
 
-    # Annoterad snapshot (för visuell referens)
     frame_to_save = frame.copy()
     draw_detection_zone(frame_to_save)
     draw_tracked_objects(frame_to_save, {object_id: obj})
     cv2.imwrite(snapshot_path, frame_to_save)
-
-    # ANPR-crops: spara upp till TOP_N skarpaste frames (bäst först).
-    # Fallback: croppa från korsningsframen om inga trackade crops finns.
-    if best_crops:
-        for i, crop in enumerate(best_crops, start=1):
-            anpr_path = snapshot_path.replace(".jpg", f"_anpr{i}.jpg")
-            cv2.imwrite(anpr_path, crop)
-    else:
-        x1, y1, x2, y2 = obj["bbox"]
-        fh, fw = frame.shape[:2]
-        h = y2 - y1
-        padding_x = int((x2 - x1) * 0.05)
-        padding_y_bottom = int(h * 0.15)
-        cx1 = max(0, x1 - padding_x)
-        cx2 = min(fw, x2 + padding_x)
-        cy1 = max(0, y1)
-        cy2 = min(fh, y2 + padding_y_bottom)
-        if cx2 > cx1 and cy2 > cy1:
-            anpr_path = snapshot_path.replace(".jpg", "_anpr1.jpg")
-            cv2.imwrite(anpr_path, frame[cy1:cy2, cx1:cx2])
 
     return snapshot_path
 
@@ -469,7 +447,6 @@ def handle_passages(
     frame,
     tracked_objects: dict[int, dict],
     line_counter: MultiLineCounter,
-    best_crop_tracker: "BestCropTracker | None" = None,
     plate_ocr_worker: "PlateOCRWorker | None" = None,
 ) -> None:
     for object_id, obj in tracked_objects.items():
@@ -502,18 +479,12 @@ def handle_passages(
 
             snapshot_path = None
             if SAVE_SNAPSHOTS:
-                best_crops = (
-                    best_crop_tracker.get_all(object_id)
-                    if best_crop_tracker is not None
-                    else None
-                )
                 snapshot_path = save_passage_snapshot(
                     frame=frame,
                     object_id=object_id,
                     obj=obj,
                     line_name=line_name,
                     direction=direction,
-                    best_crops=best_crops,
                 )
 
             db.insert_event(
@@ -592,7 +563,6 @@ def main() -> None:
     )
 
     line_counter = MultiLineCounter(LINES)
-    best_crop_tracker = BestCropTracker()
     plate_ocr_worker = PlateOCRWorker()
 
     cap = open_stream(RTSP_URL)
@@ -628,18 +598,17 @@ def main() -> None:
             old_ids = set(tracker.objects.keys())
             tracked_objects = tracker.update(detections)
 
-            # Uppdatera BestCropTracker och live-OCR per fordon
+            # Skicka fordonscrop till live-OCR-tråden
+            vehicle_classes = {"car", "truck", "bus", "motorcycle"}
             for object_id, obj in tracked_objects.items():
                 if obj.get("missing", 0) > 0:
                     continue
-                if obj["class_name"] not in BestCropTracker.VEHICLE_CLASSES:
+                if obj["class_name"] not in vehicle_classes:
                     continue
-                best_crop_tracker.update(object_id, frame, obj["bbox"])
                 plate_ocr_worker.submit(object_id, frame, obj["bbox"])
 
             # Rensa IDs som försvunnit ur trackern
             for removed_id in old_ids - set(tracked_objects.keys()):
-                best_crop_tracker.remove(removed_id)
                 plate_ocr_worker.remove(removed_id)
 
             handle_passages(
@@ -647,7 +616,6 @@ def main() -> None:
                 frame=frame,
                 tracked_objects=tracked_objects,
                 line_counter=line_counter,
-                best_crop_tracker=best_crop_tracker,
                 plate_ocr_worker=plate_ocr_worker,
             )
 
