@@ -5,13 +5,19 @@ import cv2
 import easyocr
 
 
-# Svenska:  ABC123 eller ABC12D  (3 bokstäver + 2 siffror + siffra/bokstav)
+# Svenska:  ABC123 / ABC12D      (3 bokstäver + 2 siffror + siffra/bokstav)
 # Norska:   AB12345             (2 bokstäver + 5 siffror)
-# Danska:   AB12345             (2 bokstäver + 5 siffror, samma som norska)
+# Danska:   AB12345             (samma som norska)
+# Polska:   WA12345 / WA1234A   (2 bokstäver + 4–5 alfanumeriska)
+# Tyska:    ABCD1234            (1–3 bokstäver stad + 1–2 bokstäver + 1–4 siffror,
+#                                totalt minst 6 tecken — fångas av post-filter nedan)
 PLATE_PATTERNS = [
-    re.compile(r"[A-Z]{3}[0-9]{2}[A-Z0-9]"),   # Sverige
-    re.compile(r"[A-Z]{2}[0-9]{5}"),             # Norge / Danmark
+    re.compile(r"[A-Z]{3}[0-9]{2}[A-Z0-9]"),        # Sverige
+    re.compile(r"[A-Z]{2}[0-9]{5}"),                 # Norge / Danmark
+    re.compile(r"[A-Z]{2}[A-Z0-9]{4,5}"),            # Polen
+    re.compile(r"[A-Z]{1,3}[A-Z]{1,2}[0-9]{1,4}"),  # Tyskland (brett — röstning filtrerar brus)
 ]
+PLATE_MIN_LENGTH = 6  # kasta träffar kortare än detta (skyddar mot tyska korta falska positiva)
 PLATE_ALLOWLIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 
@@ -34,10 +40,17 @@ class PlateReader:
 
     def extract_plate_candidates(self, text: str) -> list[str]:
         cleaned = self.clean_text(text)
-        candidates = []
+        all_matches = set()
         for pattern in PLATE_PATTERNS:
-            candidates.extend(pattern.findall(cleaned))
-        return candidates
+            for match in pattern.findall(cleaned):
+                if len(match) >= PLATE_MIN_LENGTH:
+                    all_matches.add(match)
+        # Ta bort matchningar som är substring av en längre matchning
+        # (t.ex. BCD123 när MABCD123 också finns, eller AB1234 när AB12345 finns)
+        filtered = [m for m in all_matches if not any(
+            m in other and len(other) > len(m) for other in all_matches
+        )]
+        return sorted(filtered, key=len, reverse=True)
 
     def preprocess_image(self, image):
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
