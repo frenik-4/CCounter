@@ -520,6 +520,19 @@ def handle_passages(
                 f"{plate_info}"
             )
 
+def _write_status(db_path: str, fps: float, stream: str) -> None:
+    status_path = os.path.join(os.path.dirname(db_path), "status.json")
+    try:
+        with open(status_path, "w") as f:
+            json.dump({
+                "fps": round(fps, 1),
+                "stream": stream,
+                "updated_at": datetime.now().isoformat(timespec="seconds"),
+            }, f)
+    except Exception:
+        pass
+
+
 def reconnect(rtsp_url: str, delay_seconds: int = 5) -> cv2.VideoCapture:
     print(f"Tappade strommen. Forsoker ateransluta om {delay_seconds} sekunder...")
     time.sleep(delay_seconds)
@@ -577,6 +590,7 @@ def main() -> None:
 
             if not ret or frame is None:
                 db.log_stream_event("down")
+                _write_status(DATABASE_PATH, fps=0.0, stream="down")
                 cap.release()
                 cap = None
                 while cap is None:
@@ -636,16 +650,7 @@ def main() -> None:
                     f"Events totalt: {db.count_events()}"
                 )
 
-                status_path = os.path.join(os.path.dirname(DATABASE_PATH), "status.json")
-                try:
-                    with open(status_path, "w") as f:
-                        json.dump({
-                            "fps": round(fps, 1),
-                            "stream": "up",
-                            "updated_at": datetime.now().isoformat(timespec="seconds"),
-                        }, f)
-                except Exception:
-                    pass
+                _write_status(DATABASE_PATH, fps=fps, stream="up")
 
             if SHOW_WINDOW:
                 draw_detection_zone(frame)

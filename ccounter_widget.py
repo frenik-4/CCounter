@@ -17,7 +17,7 @@ DB_PATH       = "/home/lucky9/CCounter/data/ccounter.db"
 STATUS_PATH   = "/home/lucky9/CCounter/data/status.json"
 POS_PATH      = os.path.expanduser("~/.config/ccounter_widget_pos.json")
 REFRESH_SECONDS      = 10
-STATUS_STALE_SECONDS = 30
+STATUS_STALE_SECONDS = 90
 
 BG       = "#0f172a"
 FG_HEAD  = "#f1f5f9"
