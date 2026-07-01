@@ -5,7 +5,13 @@ import cv2
 import easyocr
 
 
-PLATE_PATTERN = re.compile(r"[A-Z]{3}[0-9]{2}[A-Z0-9]")
+# Svenska:  ABC123 eller ABC12D  (3 bokstäver + 2 siffror + siffra/bokstav)
+# Norska:   AB12345             (2 bokstäver + 5 siffror)
+# Danska:   AB12345             (2 bokstäver + 5 siffror, samma som norska)
+PLATE_PATTERNS = [
+    re.compile(r"[A-Z]{3}[0-9]{2}[A-Z0-9]"),   # Sverige
+    re.compile(r"[A-Z]{2}[0-9]{5}"),             # Norge / Danmark
+]
 PLATE_ALLOWLIST = "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
 
 
@@ -28,7 +34,10 @@ class PlateReader:
 
     def extract_plate_candidates(self, text: str) -> list[str]:
         cleaned = self.clean_text(text)
-        return PLATE_PATTERN.findall(cleaned)
+        candidates = []
+        for pattern in PLATE_PATTERNS:
+            candidates.extend(pattern.findall(cleaned))
+        return candidates
 
     def preprocess_image(self, image):
         gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
