@@ -9,8 +9,11 @@ Användning:
 """
 
 import os
+import sys
 
 import cv2
+
+LOCK_FILE = "/tmp/ccounter_anpr_worker.lock"
 
 from src.ccounter.config import (
     DATABASE_PATH,
@@ -113,6 +116,18 @@ def process_event(event, plate_reader: PlateReader) -> tuple[str, float] | None:
 
 
 def main() -> None:
+    if os.path.exists(LOCK_FILE):
+        print("ANPR-worker körs redan — avslutar.")
+        sys.exit(0)
+
+    open(LOCK_FILE, "w").close()
+    try:
+        _run()
+    finally:
+        os.remove(LOCK_FILE)
+
+
+def _run() -> None:
     print("ANPR-worker startar...")
     print(f"  Databas:      {DATABASE_PATH}")
     print(f"  GPU:          {PLATE_READER_GPU}")
@@ -151,6 +166,7 @@ def main() -> None:
     print()
     print(f"Klar. Hittade regnummer i {found}/{total} events.")
     db.close()
+    os._exit(0)
 
 
 if __name__ == "__main__":

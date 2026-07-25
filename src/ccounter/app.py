@@ -44,9 +44,10 @@ from src.ccounter.plate_reader import PlateReader
 from src.ccounter.track_plate_manager import TrackPlateManager, PlateCandidate
 
 
-# Testa senare igen när ethernet är inkopplat.
-# Vissa kameror fungerar bättre med TCP, andra sämre.
-# os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+# Undertryck FFmpeg/libavcodec varningar (t.ex. H.264 macroblock-fel) som
+# annars svämmar över journald och kan låsa systemet vid dålig RTSP-signal.
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "fatal"
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
 
 
 def open_stream(rtsp_url: str) -> cv2.VideoCapture:
