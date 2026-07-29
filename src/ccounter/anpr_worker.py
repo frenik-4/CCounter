@@ -9,11 +9,22 @@ Användning:
 """
 
 import os
+import signal
 import sys
 
 import cv2
 
 LOCK_FILE = "/tmp/ccounter_anpr_worker.lock"
+
+
+def _handle_sigterm(signum, frame) -> None:
+    # timeout(1) skickar SIGTERM om körningen tar för lång tid. Utan denna
+    # hanterare dör processen direkt utan att köra main()s finally-block,
+    # vilket lämnar låsfilen kvar och blockerar nästa timmes körning.
+    raise SystemExit(0)
+
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
 
 from src.ccounter.config import (
     DATABASE_PATH,
