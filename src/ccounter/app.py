@@ -7,7 +7,6 @@ from datetime import datetime
 
 import cv2
 import numpy as np
-from ultralytics import YOLO
 
 from src.ccounter.config import (
     RTSP_URL,
@@ -69,9 +68,13 @@ def open_stream(rtsp_url: str) -> cv2.VideoCapture:
     return cap
 
 
+# Zonpolygonen är statisk under hela körningen — bygg numpy-arrayen en gång
+# istället för per detektion (sparar tiotals allokeringar per sekund).
+_DETECTION_ZONE_NP = np.array(DETECTION_ZONE, dtype=np.int32)
+
+
 def point_inside_zone(point: tuple[int, int]) -> bool:
-    zone = np.array(DETECTION_ZONE, dtype=np.int32)
-    result = cv2.pointPolygonTest(zone, point, False)
+    result = cv2.pointPolygonTest(_DETECTION_ZONE_NP, point, False)
 
     return result >= 0
 
@@ -116,11 +119,9 @@ def draw_detection_zone(frame) -> None:
     if not DRAW_DETECTION_ZONE:
         return
 
-    zone = np.array(DETECTION_ZONE, dtype=np.int32)
-
     cv2.polylines(
         frame,
-        [zone],
+        [_DETECTION_ZONE_NP],
         isClosed=True,
         color=(255, 255, 0),
         thickness=2,
@@ -236,6 +237,26 @@ def draw_tracked_objects(frame, tracked_objects: dict[int, dict]) -> None:
         )
 
 
+# JPEG-komprimering av en 4K-frame tar 100-300 ms — för långt för att göra
+# synkront i realtidsloopen vid varje passage. En bakgrundstråd sköter
+# diskskrivningen; kön droppar hellre en snapshot än blockerar videoflödet.
+_snapshot_q: queue.Queue = queue.Queue(maxsize=20)
+
+
+def _snapshot_writer() -> None:
+    while True:
+        path, image = _snapshot_q.get()
+        try:
+            cv2.imwrite(path, image)
+        except Exception as exc:
+            print(f"Snapshot-skrivfel: {exc}")
+        finally:
+            _snapshot_q.task_done()
+
+
+threading.Thread(target=_snapshot_writer, daemon=True, name="snapshot-writer").start()
+
+
 def save_passage_snapshot(
     frame,
     object_id: int,
@@ -259,7 +280,11 @@ def save_passage_snapshot(
     frame_to_save = frame.copy()
     draw_detection_zone(frame_to_save)
     draw_tracked_objects(frame_to_save, {object_id: obj})
-    cv2.imwrite(snapshot_path, frame_to_save)
+    try:
+        _snapshot_q.put_nowait((snapshot_path, frame_to_save))
+    except queue.Full:
+        print("Snapshot-kön full — sparar synkront.")
+        cv2.imwrite(snapshot_path, frame_to_save)
 
     return snapshot_path
 
@@ -571,7 +596,11 @@ def main() -> None:
     if YOLO_MODEL.rstrip("/").endswith("_openvino_model"):
         model = OVDetector(YOLO_MODEL, device="GPU", conf=CONFIDENCE_THRESHOLD)
     else:
+        # Lazy import — ultralytics är tungt att ladda och behövs inte alls
+        # när OpenVINO-detektorn används (normalfallet).
         import torch
+        from ultralytics import YOLO
+
         yolo_device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"YOLO device: {yolo_device}")
         model = YOLO(YOLO_MODEL)
