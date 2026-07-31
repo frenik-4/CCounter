@@ -399,6 +399,7 @@ class PlateOCRWorker:
             self._candidates.pop(track_id, None)
 
     def _run(self) -> None:
+        processed_count = 0
         while True:
             track_id, crop = self._q.get()
             try:
@@ -406,6 +407,14 @@ class PlateOCRWorker:
                 if float(cv2.Laplacian(gray, cv2.CV_64F).var()) < self._sharpness_threshold:
                     continue
                 result = self._reader.read_plate_from_image_array(crop)
+                processed_count += 1
+                if PLATE_READER_GPU and processed_count % 200 == 0:
+                    # EasyOCR/PyTorch cachar GPU-minne per unik cropstorlek och
+                    # lämnar aldrig tillbaka det spontant - växer annars till
+                    # flera GB över en dags drift utan att faktiskt behövas.
+                    import torch
+
+                    torch.cuda.empty_cache()
                 if not result["plate_found"]:
                     continue
                 plate_text = result["plate_text"]
