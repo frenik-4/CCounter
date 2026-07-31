@@ -148,6 +148,10 @@ WEB_UPLOAD_UPLOAD_INDEX = get_bool("WEB_UPLOAD_UPLOAD_INDEX", True)
 
 EXPORT_MAX_DAYS = int(os.getenv("EXPORT_MAX_DAYS", "60"))
 
+# Hur många veckor zippade snapshot-arkiv behålls innan de raderas av
+# maintenance. 0 = behåll för alltid (arkiven växer då obegränsat, ~4-5 GB/vecka).
+ARCHIVE_MAX_WEEKS = int(os.getenv("ARCHIVE_MAX_WEEKS", "12"))
+
 # Minsta fordonsbredd (px) i bbox för att ANPR-crop ska sparas.
 # Vid 4K (3840 px) motsvarar 350 px ~9 % av bildbredden.
 # Sänk om kameran är monterad längre bort, höj om fordon syns tidigt men delvis.

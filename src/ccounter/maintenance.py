@@ -14,7 +14,7 @@ import zipfile
 from datetime import date, timedelta
 from pathlib import Path
 
-from src.ccounter.config import SNAPSHOT_DIR
+from src.ccounter.config import ARCHIVE_MAX_WEEKS, SNAPSHOT_DIR
 
 SNAPSHOT_PATH = Path(SNAPSHOT_DIR)
 ARCHIVE_DIR = SNAPSHOT_PATH / "archives"
@@ -80,6 +80,25 @@ def archive_completed_weeks() -> list[str]:
     return archived
 
 
+def prune_old_archives() -> int:
+    """Raderar veckoarkiv äldre än ARCHIVE_MAX_WEEKS. 0 = behåll allt."""
+    if ARCHIVE_MAX_WEEKS <= 0:
+        return 0
+
+    cutoff = date.today() - timedelta(weeks=ARCHIVE_MAX_WEEKS)
+    deleted = 0
+    for zip_path in ARCHIVE_DIR.glob("snapshots_*_*.zip"):
+        # Filnamn: snapshots_YYYY-MM-DD_YYYY-MM-DD.zip — jämför veckans slutdatum.
+        try:
+            end = date.fromisoformat(zip_path.stem.split("_")[2])
+        except (ValueError, IndexError):
+            continue
+        if end < cutoff:
+            zip_path.unlink()
+            deleted += 1
+    return deleted
+
+
 def main() -> None:
     print(f"Snapshot-mapp: {SNAPSHOT_PATH}")
 
@@ -92,6 +111,9 @@ def main() -> None:
             print(f"Arkiverad: {z}")
     else:
         print("Inga veckor att arkivera.")
+
+    pruned = prune_old_archives()
+    print(f"Borttagna veckoarkiv (>{ARCHIVE_MAX_WEEKS} veckor): {pruned}")
 
 
 if __name__ == "__main__":

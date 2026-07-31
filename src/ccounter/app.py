@@ -483,6 +483,7 @@ def handle_passages(
     tracked_objects: dict[int, dict],
     line_counter: MultiLineCounter,
     plate_ocr_worker: "PlateOCRWorker | None" = None,
+    best_crops: "BestCropTracker | None" = None,
 ) -> None:
     for object_id, obj in tracked_objects.items():
         if obj.get("missing", 0) > 0:
@@ -522,6 +523,17 @@ def handle_passages(
                     direction=direction,
                 )
 
+                # Spara de skarpaste fordonscropparna som _anpr1-5.jpg —
+                # anpr_worker provar dessa först och får betydligt bättre
+                # bildunderlag än en retroaktiv crop ur fullbilden.
+                if best_crops is not None:
+                    for i, crop in enumerate(best_crops.get_all(object_id), start=1):
+                        crop_path = snapshot_path.replace(".jpg", f"_anpr{i}.jpg")
+                        try:
+                            _snapshot_q.put_nowait((crop_path, crop))
+                        except queue.Full:
+                            cv2.imwrite(crop_path, crop)
+
             db.insert_event(
                 event_type=event_type,
                 track_id=object_id,
@@ -555,13 +567,32 @@ def handle_passages(
                 f"{plate_info}"
             )
 
-def _write_status(db_path: str, fps: float, stream: str) -> None:
+def _write_status(
+    db_path: str,
+    fps: float,
+    stream: str,
+    ocr_queue: int = 0,
+    snapshot_queue: int = 0,
+) -> None:
     status_path = os.path.join(os.path.dirname(db_path), "status.json")
+
+    vram_mb = None
+    if PLATE_READER_GPU:
+        try:
+            import torch
+
+            vram_mb = int(torch.cuda.memory_reserved() / (1024 * 1024))
+        except Exception:
+            pass
+
     try:
         with open(status_path, "w") as f:
             json.dump({
                 "fps": round(fps, 1),
                 "stream": stream,
+                "ocr_queue": ocr_queue,
+                "snapshot_queue": snapshot_queue,
+                "vram_mb": vram_mb,
                 "updated_at": datetime.now().isoformat(timespec="seconds"),
             }, f)
     except Exception:
@@ -616,6 +647,7 @@ def main() -> None:
 
     line_counter = MultiLineCounter(LINES)
     plate_ocr_worker = PlateOCRWorker()
+    best_crops = BestCropTracker()
 
     cap = open_stream(RTSP_URL)
     db.log_stream_event("up")
@@ -651,7 +683,7 @@ def main() -> None:
             old_ids = set(tracker.objects.keys())
             tracked_objects = tracker.update(detections)
 
-            # Skicka fordonscrop till live-OCR-tråden
+            # Skicka fordonscrop till live-OCR-tråden och skärpespåraren
             vehicle_classes = {"car", "truck", "bus", "motorcycle"}
             for object_id, obj in tracked_objects.items():
                 if obj.get("missing", 0) > 0:
@@ -659,10 +691,12 @@ def main() -> None:
                 if obj["class_name"] not in vehicle_classes:
                     continue
                 plate_ocr_worker.submit(object_id, frame, obj["bbox"])
+                best_crops.update(object_id, frame, obj["bbox"])
 
             # Rensa IDs som försvunnit ur trackern
             for removed_id in old_ids - set(tracked_objects.keys()):
                 plate_ocr_worker.remove(removed_id)
+                best_crops.remove(removed_id)
 
             handle_passages(
                 db=db,
@@ -670,6 +704,7 @@ def main() -> None:
                 tracked_objects=tracked_objects,
                 line_counter=line_counter,
                 plate_ocr_worker=plate_ocr_worker,
+                best_crops=best_crops,
             )
 
             if frame_count % 150 == 0:
@@ -689,7 +724,13 @@ def main() -> None:
                     f"Events totalt: {db.count_events()}"
                 )
 
-                _write_status(DATABASE_PATH, fps=fps, stream="up")
+                _write_status(
+                    DATABASE_PATH,
+                    fps=fps,
+                    stream="up",
+                    ocr_queue=plate_ocr_worker._q.qsize(),
+                    snapshot_queue=_snapshot_q.qsize(),
+                )
 
             if SHOW_WINDOW:
                 draw_detection_zone(frame)
