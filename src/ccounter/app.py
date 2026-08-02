@@ -46,7 +46,11 @@ from src.ccounter.track_plate_manager import TrackPlateManager, PlateCandidate
 # Undertryck FFmpeg/libavcodec varningar (t.ex. H.264 macroblock-fel) som
 # annars svämmar över journald och kan låsa systemet vid dålig RTSP-signal.
 os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "fatal"
-os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+
+# threads;4 later ut H.264-mjukvaruavkodningen over flera CPU-karnor
+# istallet for en enda — 4K-strommen (25 FPS) hann annars inte med och
+# CCounter tappade frames (~15 FPS). Verifierat: 26,7 FPS med detta satt.
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|threads;4"
 
 
 def open_stream(rtsp_url: str) -> cv2.VideoCapture:
