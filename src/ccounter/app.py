@@ -649,6 +649,16 @@ def main() -> None:
         max_missing_frames=TRACKER_MAX_MISSING_FRAMES,
     )
 
+    if PLATE_READER_GPU:
+        # Utan hård gräns växer PyTorch-allokatorns cache obegränsat över
+        # timmar/dagar (observerat: 1 GB -> 4+ GB), vilket kan svälta ut
+        # anpr_worker när den startar sin egen GPU-kontext varje timme.
+        # 50% garanterar att minst halva kortet alltid är ledigt åt andra.
+        import torch
+
+        torch.cuda.set_per_process_memory_fraction(0.5, device=0)
+        print(f"GPU-minnesgräns satt: 50% ({torch.cuda.get_device_properties(0).total_memory / 1024**3 * 0.5:.1f} GB)")
+
     line_counter = MultiLineCounter(LINES)
     plate_ocr_worker = PlateOCRWorker()
     best_crops = BestCropTracker()

@@ -11,6 +11,7 @@ Användning:
 import os
 import signal
 import sys
+import time
 
 import cv2
 
@@ -81,6 +82,8 @@ def process_event(event, plate_reader: PlateReader) -> tuple[str, float] | None:
         return None
 
     # --- Försök 1: numrerade ANPR-crops (top-5, bäst konfidens vinner) ---
+    # Avbryter tidigt vid hög konfidens - sparar CPU-tid på CPU-baserad OCR.
+    EARLY_EXIT_CONFIDENCE = 0.7
     best_result: tuple[str, float] | None = None
     for i in range(1, 6):
         anpr_path = snapshot_path.replace(".jpg", f"_anpr{i}.jpg")
@@ -92,6 +95,8 @@ def process_event(event, plate_reader: PlateReader) -> tuple[str, float] | None:
         result = try_read(plate_reader, image)
         if result is not None and (best_result is None or result[1] > best_result[1]):
             best_result = result
+        if best_result is not None and best_result[1] >= EARLY_EXIT_CONFIDENCE:
+            break
 
     if best_result is not None:
         return best_result
@@ -138,6 +143,35 @@ def main() -> None:
         os.remove(LOCK_FILE)
 
 
+# Antal events per batch innan GPU-cachen rensas. Håller nere
+# toppminnesanvändningen istället för att låta den växa genom hela kön.
+BATCH_SIZE = 15
+
+# Hur många gånger vi väntar på ledigt VRAM innan vi ger upp och kraschar
+# (huvudappen har en hård 50%-gräns, så det här är bara ett skyddsnät).
+VRAM_WAIT_RETRIES = 6
+VRAM_WAIT_SECONDS = 10
+VRAM_MIN_FREE_GB = 1.2
+
+
+def _wait_for_free_vram() -> None:
+    if not PLATE_READER_GPU:
+        return
+
+    import torch
+
+    for attempt in range(1, VRAM_WAIT_RETRIES + 1):
+        free_bytes, _total_bytes = torch.cuda.mem_get_info(0)
+        free_gb = free_bytes / 1024**3
+        if free_gb >= VRAM_MIN_FREE_GB:
+            return
+        print(
+            f"Väntar på ledigt VRAM ({free_gb:.2f} GB fritt, behöver "
+            f"{VRAM_MIN_FREE_GB} GB) — försök {attempt}/{VRAM_WAIT_RETRIES}..."
+        )
+        time.sleep(VRAM_WAIT_SECONDS)
+
+
 def _run() -> None:
     print("ANPR-worker startar...")
     print(f"  Databas:      {DATABASE_PATH}")
@@ -154,6 +188,8 @@ def _run() -> None:
         print("Inga events att bearbeta — alla har redan regnummer eller saknar snapshot.")
         db.close()
         return
+
+    _wait_for_free_vram()
 
     print(f"Hittade {total} events utan regnummer. Laddar PlateReader...")
     plate_reader = PlateReader(gpu=PLATE_READER_GPU)
@@ -173,6 +209,11 @@ def _run() -> None:
         else:
             db.mark_anpr_attempted(event_id)
             print(f"[{i}/{total}] Event {event_id}: inget regnummer hittat")
+
+        if PLATE_READER_GPU and i % BATCH_SIZE == 0:
+            import torch
+
+            torch.cuda.empty_cache()
 
     print()
     print(f"Klar. Hittade regnummer i {found}/{total} events.")
