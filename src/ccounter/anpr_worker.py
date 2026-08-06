@@ -9,8 +9,23 @@ Användning:
 """
 
 import os
+import signal
+import sys
+import time
 
 import cv2
+
+LOCK_FILE = "/tmp/ccounter_anpr_worker.lock"
+
+
+def _handle_sigterm(signum, frame) -> None:
+    # timeout(1) skickar SIGTERM om körningen tar för lång tid. Utan denna
+    # hanterare dör processen direkt utan att köra main()s finally-block,
+    # vilket lämnar låsfilen kvar och blockerar nästa timmes körning.
+    raise SystemExit(0)
+
+
+signal.signal(signal.SIGTERM, _handle_sigterm)
 
 from src.ccounter.config import (
     DATABASE_PATH,
@@ -67,6 +82,8 @@ def process_event(event, plate_reader: PlateReader) -> tuple[str, float] | None:
         return None
 
     # --- Försök 1: numrerade ANPR-crops (top-5, bäst konfidens vinner) ---
+    # Avbryter tidigt vid hög konfidens - sparar CPU-tid på CPU-baserad OCR.
+    EARLY_EXIT_CONFIDENCE = 0.7
     best_result: tuple[str, float] | None = None
     for i in range(1, 6):
         anpr_path = snapshot_path.replace(".jpg", f"_anpr{i}.jpg")
@@ -78,6 +95,8 @@ def process_event(event, plate_reader: PlateReader) -> tuple[str, float] | None:
         result = try_read(plate_reader, image)
         if result is not None and (best_result is None or result[1] > best_result[1]):
             best_result = result
+        if best_result is not None and best_result[1] >= EARLY_EXIT_CONFIDENCE:
+            break
 
     if best_result is not None:
         return best_result
@@ -113,6 +132,47 @@ def process_event(event, plate_reader: PlateReader) -> tuple[str, float] | None:
 
 
 def main() -> None:
+    if os.path.exists(LOCK_FILE):
+        print("ANPR-worker körs redan — avslutar.")
+        sys.exit(0)
+
+    open(LOCK_FILE, "w").close()
+    try:
+        _run()
+    finally:
+        os.remove(LOCK_FILE)
+
+
+# Antal events per batch innan GPU-cachen rensas. Håller nere
+# toppminnesanvändningen istället för att låta den växa genom hela kön.
+BATCH_SIZE = 5
+
+# Hur många gånger vi väntar på ledigt VRAM innan vi ger upp och kraschar
+# (huvudappen har en hård 50%-gräns, så det här är bara ett skyddsnät).
+VRAM_WAIT_RETRIES = 6
+VRAM_WAIT_SECONDS = 10
+VRAM_MIN_FREE_GB = 1.2
+
+
+def _wait_for_free_vram() -> None:
+    if not PLATE_READER_GPU:
+        return
+
+    import torch
+
+    for attempt in range(1, VRAM_WAIT_RETRIES + 1):
+        free_bytes, _total_bytes = torch.cuda.mem_get_info(0)
+        free_gb = free_bytes / 1024**3
+        if free_gb >= VRAM_MIN_FREE_GB:
+            return
+        print(
+            f"Väntar på ledigt VRAM ({free_gb:.2f} GB fritt, behöver "
+            f"{VRAM_MIN_FREE_GB} GB) — försök {attempt}/{VRAM_WAIT_RETRIES}..."
+        )
+        time.sleep(VRAM_WAIT_SECONDS)
+
+
+def _run() -> None:
     print("ANPR-worker startar...")
     print(f"  Databas:      {DATABASE_PATH}")
     print(f"  GPU:          {PLATE_READER_GPU}")
@@ -129,15 +189,42 @@ def main() -> None:
         db.close()
         return
 
+    _wait_for_free_vram()
+
     print(f"Hittade {total} events utan regnummer. Laddar PlateReader...")
     plate_reader = PlateReader(gpu=PLATE_READER_GPU)
     print("PlateReader klar.\n")
 
     found = 0
+    skipped_oom = 0
 
     for i, event in enumerate(events, start=1):
         event_id = event["id"]
-        result = process_event(event, plate_reader)
+
+        # Kollar ledigt VRAM före VARJE event, inte bara vid start. Huvud-
+        # appens live-OCR äter och släpper minne kontinuerligt medan vi kör,
+        # så tillgängligt utrymme kan bli knappt när som helst under körningen.
+        _wait_for_free_vram()
+
+        try:
+            result = process_event(event, plate_reader)
+        except Exception as exc:
+            # CUDA-minnesbrist krockar ibland med huvudappens live-OCR som
+            # körs samtidigt på samma GPU. Kraschar hela processen tidigare
+            # hela batchen förlorades - nu hoppar vi bara över eventet
+            # (utan att markera anpr_attempted) så det försöks igen nästa
+            # timme, och fortsätter med resten av kön.
+            is_oom = "out of memory" in str(exc).lower()
+            if not is_oom:
+                raise
+            skipped_oom += 1
+            print(f"[{i}/{total}] Event {event_id}: CUDA OOM - hoppar över, försöker igen nästa körning")
+            if PLATE_READER_GPU:
+                import torch
+
+                torch.cuda.empty_cache()
+            time.sleep(2)
+            continue
 
         if result is not None:
             plate_text, confidence = result
@@ -148,9 +235,15 @@ def main() -> None:
             db.mark_anpr_attempted(event_id)
             print(f"[{i}/{total}] Event {event_id}: inget regnummer hittat")
 
+        if PLATE_READER_GPU and i % BATCH_SIZE == 0:
+            import torch
+
+            torch.cuda.empty_cache()
+
     print()
-    print(f"Klar. Hittade regnummer i {found}/{total} events.")
+    print(f"Klar. Hittade regnummer i {found}/{total} events ({skipped_oom} skippade pga OOM).")
     db.close()
+    os._exit(0)
 
 
 if __name__ == "__main__":
