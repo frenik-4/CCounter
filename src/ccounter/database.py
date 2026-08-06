@@ -14,6 +14,13 @@ class Database:
         self.conn = sqlite3.connect(db_path)
         self.conn.row_factory = sqlite3.Row
 
+        # WAL låter läsare (publish, anpr_worker) och skrivaren (huvudappen)
+        # arbeta samtidigt utan att blockera varandra. busy_timeout gör att
+        # en låst databas väntar istället för att kasta "database is locked".
+        self.conn.execute("PRAGMA journal_mode=WAL")
+        self.conn.execute("PRAGMA synchronous=NORMAL")
+        self.conn.execute("PRAGMA busy_timeout=5000")
+
         self.create_tables()
 
     def create_tables(self) -> None:
@@ -117,6 +124,19 @@ class Database:
                 timestamp TEXT NOT NULL,
                 status TEXT NOT NULL
             );
+            """
+        )
+
+        self.conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);"
+        )
+        # Partiellt index för anpr_worker-kön — matchar exakt WHERE-villkoret
+        # i get_unprocessed_anpr_events så kön hittas utan tabellskanning.
+        self.conn.execute(
+            """
+            CREATE INDEX IF NOT EXISTS idx_events_anpr_queue
+            ON events(anpr_attempted, plate_detected)
+            WHERE snapshot_path IS NOT NULL AND snapshot_path != '';
             """
         )
 

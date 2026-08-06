@@ -7,7 +7,6 @@ from datetime import datetime
 
 import cv2
 import numpy as np
-from ultralytics import YOLO
 
 from src.ccounter.config import (
     RTSP_URL,
@@ -44,9 +43,14 @@ from src.ccounter.plate_reader import PlateReader
 from src.ccounter.track_plate_manager import TrackPlateManager, PlateCandidate
 
 
-# Testa senare igen när ethernet är inkopplat.
-# Vissa kameror fungerar bättre med TCP, andra sämre.
-# os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp"
+# Undertryck FFmpeg/libavcodec varningar (t.ex. H.264 macroblock-fel) som
+# annars svämmar över journald och kan låsa systemet vid dålig RTSP-signal.
+os.environ["OPENCV_FFMPEG_LOGLEVEL"] = "fatal"
+
+# threads;4 later ut H.264-mjukvaruavkodningen over flera CPU-karnor
+# istallet for en enda — 4K-strommen (25 FPS) hann annars inte med och
+# CCounter tappade frames (~15 FPS). Verifierat: 26,7 FPS med detta satt.
+os.environ["OPENCV_FFMPEG_CAPTURE_OPTIONS"] = "rtsp_transport;tcp|threads;4"
 
 
 def open_stream(rtsp_url: str) -> cv2.VideoCapture:
@@ -68,9 +72,13 @@ def open_stream(rtsp_url: str) -> cv2.VideoCapture:
     return cap
 
 
+# Zonpolygonen är statisk under hela körningen — bygg numpy-arrayen en gång
+# istället för per detektion (sparar tiotals allokeringar per sekund).
+_DETECTION_ZONE_NP = np.array(DETECTION_ZONE, dtype=np.int32)
+
+
 def point_inside_zone(point: tuple[int, int]) -> bool:
-    zone = np.array(DETECTION_ZONE, dtype=np.int32)
-    result = cv2.pointPolygonTest(zone, point, False)
+    result = cv2.pointPolygonTest(_DETECTION_ZONE_NP, point, False)
 
     return result >= 0
 
@@ -115,11 +123,9 @@ def draw_detection_zone(frame) -> None:
     if not DRAW_DETECTION_ZONE:
         return
 
-    zone = np.array(DETECTION_ZONE, dtype=np.int32)
-
     cv2.polylines(
         frame,
-        [zone],
+        [_DETECTION_ZONE_NP],
         isClosed=True,
         color=(255, 255, 0),
         thickness=2,
@@ -235,6 +241,26 @@ def draw_tracked_objects(frame, tracked_objects: dict[int, dict]) -> None:
         )
 
 
+# JPEG-komprimering av en 4K-frame tar 100-300 ms — för långt för att göra
+# synkront i realtidsloopen vid varje passage. En bakgrundstråd sköter
+# diskskrivningen; kön droppar hellre en snapshot än blockerar videoflödet.
+_snapshot_q: queue.Queue = queue.Queue(maxsize=20)
+
+
+def _snapshot_writer() -> None:
+    while True:
+        path, image = _snapshot_q.get()
+        try:
+            cv2.imwrite(path, image)
+        except Exception as exc:
+            print(f"Snapshot-skrivfel: {exc}")
+        finally:
+            _snapshot_q.task_done()
+
+
+threading.Thread(target=_snapshot_writer, daemon=True, name="snapshot-writer").start()
+
+
 def save_passage_snapshot(
     frame,
     object_id: int,
@@ -258,7 +284,11 @@ def save_passage_snapshot(
     frame_to_save = frame.copy()
     draw_detection_zone(frame_to_save)
     draw_tracked_objects(frame_to_save, {object_id: obj})
-    cv2.imwrite(snapshot_path, frame_to_save)
+    try:
+        _snapshot_q.put_nowait((snapshot_path, frame_to_save))
+    except queue.Full:
+        print("Snapshot-kön full — sparar synkront.")
+        cv2.imwrite(snapshot_path, frame_to_save)
 
     return snapshot_path
 
@@ -398,6 +428,7 @@ class PlateOCRWorker:
             self._candidates.pop(track_id, None)
 
     def _run(self) -> None:
+        processed_count = 0
         while True:
             track_id, crop = self._q.get()
             try:
@@ -405,6 +436,14 @@ class PlateOCRWorker:
                 if float(cv2.Laplacian(gray, cv2.CV_64F).var()) < self._sharpness_threshold:
                     continue
                 result = self._reader.read_plate_from_image_array(crop)
+                processed_count += 1
+                if PLATE_READER_GPU and processed_count % 200 == 0:
+                    # EasyOCR/PyTorch cachar GPU-minne per unik cropstorlek och
+                    # lämnar aldrig tillbaka det spontant - växer annars till
+                    # flera GB över en dags drift utan att faktiskt behövas.
+                    import torch
+
+                    torch.cuda.empty_cache()
                 if not result["plate_found"]:
                     continue
                 plate_text = result["plate_text"]
@@ -448,6 +487,7 @@ def handle_passages(
     tracked_objects: dict[int, dict],
     line_counter: MultiLineCounter,
     plate_ocr_worker: "PlateOCRWorker | None" = None,
+    best_crops: "BestCropTracker | None" = None,
 ) -> None:
     for object_id, obj in tracked_objects.items():
         if obj.get("missing", 0) > 0:
@@ -487,6 +527,17 @@ def handle_passages(
                     direction=direction,
                 )
 
+                # Spara de skarpaste fordonscropparna som _anpr1-5.jpg —
+                # anpr_worker provar dessa först och får betydligt bättre
+                # bildunderlag än en retroaktiv crop ur fullbilden.
+                if best_crops is not None:
+                    for i, crop in enumerate(best_crops.get_all(object_id), start=1):
+                        crop_path = snapshot_path.replace(".jpg", f"_anpr{i}.jpg")
+                        try:
+                            _snapshot_q.put_nowait((crop_path, crop))
+                        except queue.Full:
+                            cv2.imwrite(crop_path, crop)
+
             db.insert_event(
                 event_type=event_type,
                 track_id=object_id,
@@ -520,13 +571,32 @@ def handle_passages(
                 f"{plate_info}"
             )
 
-def _write_status(db_path: str, fps: float, stream: str) -> None:
+def _write_status(
+    db_path: str,
+    fps: float,
+    stream: str,
+    ocr_queue: int = 0,
+    snapshot_queue: int = 0,
+) -> None:
     status_path = os.path.join(os.path.dirname(db_path), "status.json")
+
+    vram_mb = None
+    if PLATE_READER_GPU:
+        try:
+            import torch
+
+            vram_mb = int(torch.cuda.memory_reserved() / (1024 * 1024))
+        except Exception:
+            pass
+
     try:
         with open(status_path, "w") as f:
             json.dump({
                 "fps": round(fps, 1),
                 "stream": stream,
+                "ocr_queue": ocr_queue,
+                "snapshot_queue": snapshot_queue,
+                "vram_mb": vram_mb,
                 "updated_at": datetime.now().isoformat(timespec="seconds"),
             }, f)
     except Exception:
@@ -561,7 +631,11 @@ def main() -> None:
     if YOLO_MODEL.rstrip("/").endswith("_openvino_model"):
         model = OVDetector(YOLO_MODEL, device="GPU", conf=CONFIDENCE_THRESHOLD)
     else:
+        # Lazy import — ultralytics är tungt att ladda och behövs inte alls
+        # när OpenVINO-detektorn används (normalfallet).
         import torch
+        from ultralytics import YOLO
+
         yolo_device = "cuda" if torch.cuda.is_available() else "cpu"
         print(f"YOLO device: {yolo_device}")
         model = YOLO(YOLO_MODEL)
@@ -575,8 +649,19 @@ def main() -> None:
         max_missing_frames=TRACKER_MAX_MISSING_FRAMES,
     )
 
+    if PLATE_READER_GPU:
+        # Utan hård gräns växer PyTorch-allokatorns cache obegränsat över
+        # timmar/dagar (observerat: 1 GB -> 4+ GB), vilket kan svälta ut
+        # anpr_worker när den startar sin egen GPU-kontext varje timme.
+        # 50% garanterar att minst halva kortet alltid är ledigt åt andra.
+        import torch
+
+        torch.cuda.set_per_process_memory_fraction(0.5, device=0)
+        print(f"GPU-minnesgräns satt: 50% ({torch.cuda.get_device_properties(0).total_memory / 1024**3 * 0.5:.1f} GB)")
+
     line_counter = MultiLineCounter(LINES)
     plate_ocr_worker = PlateOCRWorker()
+    best_crops = BestCropTracker()
 
     cap = open_stream(RTSP_URL)
     db.log_stream_event("up")
@@ -612,7 +697,7 @@ def main() -> None:
             old_ids = set(tracker.objects.keys())
             tracked_objects = tracker.update(detections)
 
-            # Skicka fordonscrop till live-OCR-tråden
+            # Skicka fordonscrop till live-OCR-tråden och skärpespåraren
             vehicle_classes = {"car", "truck", "bus", "motorcycle"}
             for object_id, obj in tracked_objects.items():
                 if obj.get("missing", 0) > 0:
@@ -620,10 +705,12 @@ def main() -> None:
                 if obj["class_name"] not in vehicle_classes:
                     continue
                 plate_ocr_worker.submit(object_id, frame, obj["bbox"])
+                best_crops.update(object_id, frame, obj["bbox"])
 
             # Rensa IDs som försvunnit ur trackern
             for removed_id in old_ids - set(tracked_objects.keys()):
                 plate_ocr_worker.remove(removed_id)
+                best_crops.remove(removed_id)
 
             handle_passages(
                 db=db,
@@ -631,6 +718,7 @@ def main() -> None:
                 tracked_objects=tracked_objects,
                 line_counter=line_counter,
                 plate_ocr_worker=plate_ocr_worker,
+                best_crops=best_crops,
             )
 
             if frame_count % 150 == 0:
@@ -650,7 +738,13 @@ def main() -> None:
                     f"Events totalt: {db.count_events()}"
                 )
 
-                _write_status(DATABASE_PATH, fps=fps, stream="up")
+                _write_status(
+                    DATABASE_PATH,
+                    fps=fps,
+                    stream="up",
+                    ocr_queue=plate_ocr_worker._q.qsize(),
+                    snapshot_queue=_snapshot_q.qsize(),
+                )
 
             if SHOW_WINDOW:
                 draw_detection_zone(frame)
