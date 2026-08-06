@@ -45,6 +45,23 @@ def query_db():
         """, (today,))
         count = cur.fetchone()["cnt"]
 
+        cur.execute("""
+            SELECT COUNT(*) AS cnt FROM events
+            WHERE date(timestamp) = ?
+              AND event_type = 'road_passage'
+              AND (final_category IS NULL OR final_category = 'road_traffic')
+              AND plate_text IS NOT NULL AND plate_text != ''
+        """, (today,))
+        plates_read = cur.fetchone()["cnt"]
+
+        cur.execute("""
+            SELECT COUNT(*) AS cnt FROM events
+            WHERE plate_detected = 0
+              AND anpr_attempted = 0
+              AND snapshot_path IS NOT NULL AND snapshot_path != ''
+        """)
+        anpr_queue = cur.fetchone()["cnt"]
+
         # Uptime idag: andel av 06:00–22:00 som strömmen varit uppe
         window_start = f"{today}T06:00:00"
         window_end   = f"{today}T22:00:00"
@@ -66,9 +83,9 @@ def query_db():
         """)
         plates = cur.fetchall()
         con.close()
-        return count, uptime_pct, plates
+        return count, plates_read, anpr_queue, uptime_pct, plates
     except Exception:
-        return None, None, []
+        return None, None, None, None, []
 
 
 def _calc_uptime(events, window_start, window_end):
@@ -235,6 +252,19 @@ class Widget(Gtk.Window):
         lbl_sub.set_halign(Gtk.Align.START)
         box.pack_start(lbl_sub, False, False, 2)
 
+        # --- Skyltar idag + ANPR-kö ---
+        plates_row = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
+        self.lbl_plates_read = Gtk.Label(label="Skyltar: —")
+        self.lbl_plates_read.get_style_context().add_class("fps")
+        self.lbl_plates_read.set_halign(Gtk.Align.START)
+        self.lbl_plates_read.set_hexpand(True)
+        self.lbl_queue = Gtk.Label(label="Kö: —")
+        self.lbl_queue.get_style_context().add_class("uptime")
+        self.lbl_queue.set_halign(Gtk.Align.END)
+        plates_row.pack_start(self.lbl_plates_read, True, True, 0)
+        plates_row.pack_end(self.lbl_queue, False, False, 0)
+        box.pack_start(plates_row, False, False, 2)
+
         # --- FPS + Uptime rad ---
         meta = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self.lbl_fps = Gtk.Label(label="FPS: —")
@@ -296,11 +326,18 @@ class Widget(Gtk.Window):
             pass
 
     def refresh(self):
-        count, uptime_pct, plates = query_db()
+        count, plates_read, anpr_queue, uptime_pct, plates = query_db()
         fps, stream_ok = read_status()
 
         # Räknare
         self.lbl_count.set_text(str(count) if count is not None else "?")
+
+        # Skyltar idag + kö
+        if count is not None and plates_read is not None:
+            self.lbl_plates_read.set_text(f"Skyltar: {plates_read}/{count}")
+        else:
+            self.lbl_plates_read.set_text("Skyltar: —")
+        self.lbl_queue.set_text(f"Kö: {anpr_queue}" if anpr_queue is not None else "Kö: —")
 
         # Status
         sc = self.lbl_status.get_style_context()

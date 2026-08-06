@@ -18,7 +18,7 @@ from src.ccounter.config import ARCHIVE_MAX_WEEKS, SNAPSHOT_DIR
 
 SNAPSHOT_PATH = Path(SNAPSHOT_DIR)
 ARCHIVE_DIR = SNAPSHOT_PATH / "archives"
-ANPR_MAX_AGE_DAYS = 7
+ANPR_MAX_AGE_DAYS = 2
 
 
 def _file_date(path: Path) -> date | None:

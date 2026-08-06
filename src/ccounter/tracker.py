@@ -1,5 +1,18 @@
 import math
 
+# Hur mycket bbox-diagonalen får skala upp tillåtet matchningsavstånd.
+# Stora/höga fordon nära kameran har en boundingbox som svänger kraftigt i
+# storlek mellan bildrutor (t.ex. när toppen av ett högt fordon går in/ut ur
+# bild), vilket flyttar centroiden mer än ett normalt fordon utan att det
+# faktiskt är ett nytt objekt. Ett fast max_distance tappar då spårningen
+# och registrerar aldrig en fullständig linjekorsning för sådana fordon.
+BBOX_DISTANCE_FACTOR = 0.6
+
+
+def _bbox_diagonal(bbox: tuple[int, int, int, int]) -> float:
+    x1, y1, x2, y2 = bbox
+    return math.hypot(x2 - x1, y2 - y1)
+
 
 class CentroidTracker:
     def __init__(self, max_distance: int = 120, max_missing_frames: int = 25):
@@ -22,18 +35,27 @@ class CentroidTracker:
         for object_id, obj in list(self.objects.items()):
             best_detection_index = None
             best_distance = float("inf")
+            best_allowed_distance = self.max_distance
 
             ox, oy = obj["center"]
+            obj_diagonal = _bbox_diagonal(obj["bbox"])
 
             for detection_index in list(unmatched_detections):
-                dx, dy = detections[detection_index]["center"]
+                detection = detections[detection_index]
+                dx, dy = detection["center"]
                 distance = math.hypot(dx - ox, dy - oy)
 
                 if distance < best_distance:
+                    det_diagonal = _bbox_diagonal(detection["bbox"])
+                    allowed_distance = max(
+                        self.max_distance,
+                        BBOX_DISTANCE_FACTOR * max(obj_diagonal, det_diagonal),
+                    )
                     best_distance = distance
                     best_detection_index = detection_index
+                    best_allowed_distance = allowed_distance
 
-            if best_detection_index is not None and best_distance <= self.max_distance:
+            if best_detection_index is not None and best_distance <= best_allowed_distance:
                 matches.append((object_id, best_detection_index))
                 unmatched_detections.remove(best_detection_index)
                 unmatched_objects.discard(object_id)
