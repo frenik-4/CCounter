@@ -145,7 +145,7 @@ def main() -> None:
 
 # Antal events per batch innan GPU-cachen rensas. Håller nere
 # toppminnesanvändningen istället för att låta den växa genom hela kön.
-BATCH_SIZE = 5
+BATCH_SIZE = 1
 
 # Hur många gånger vi väntar på ledigt VRAM innan vi ger upp och kraschar
 # (huvudappen har en hård 50%-gräns, så det här är bara ett skyddsnät).
@@ -193,6 +193,10 @@ def _run() -> None:
 
     print(f"Hittade {total} events utan regnummer. Laddar PlateReader...")
     plate_reader = PlateReader(gpu=PLATE_READER_GPU)
+    if PLATE_READER_GPU:
+        import torch
+
+        torch.cuda.empty_cache()
     print("PlateReader klar.\n")
 
     found = 0
