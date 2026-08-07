@@ -6,7 +6,9 @@ Körs fristående: python3 /home/lucky9/CCounter/ccounter_widget.py
 
 import json
 import os
+import re
 import sqlite3
+import subprocess
 from datetime import date, datetime, timedelta
 
 import gi
@@ -15,6 +17,7 @@ from gi.repository import Gtk, GLib, Gdk
 
 DB_PATH       = "/home/lucky9/CCounter/data/ccounter.db"
 STATUS_PATH   = "/home/lucky9/CCounter/data/status.json"
+ENV_PATH      = "/home/lucky9/CCounter/.env"
 POS_PATH      = os.path.expanduser("~/.config/ccounter_widget_pos.json")
 REFRESH_SECONDS      = 10
 STATUS_STALE_SECONDS = 90
@@ -120,6 +123,44 @@ def _calc_uptime(events, window_start, window_end):
     return round(100 * up_seconds / total, 1)
 
 
+def read_live_anpr_enabled() -> bool:
+    """Läser LIVE_ANPR_ENABLED från .env. Standard True om raden saknas."""
+    try:
+        with open(ENV_PATH) as f:
+            for line in f:
+                m = re.match(r"^LIVE_ANPR_ENABLED=(\w+)", line.strip())
+                if m:
+                    return m.group(1).lower() == "true"
+    except Exception:
+        pass
+    return True
+
+
+def set_live_anpr_enabled(enabled: bool) -> None:
+    """Skriver LIVE_ANPR_ENABLED till .env och startar om ccounter-tjänsten."""
+    value = "true" if enabled else "false"
+    with open(ENV_PATH) as f:
+        lines = f.readlines()
+
+    found = False
+    for i, line in enumerate(lines):
+        if re.match(r"^LIVE_ANPR_ENABLED=", line.strip()):
+            lines[i] = f"LIVE_ANPR_ENABLED={value}\n"
+            found = True
+            break
+    if not found:
+        lines.append(f"LIVE_ANPR_ENABLED={value}\n")
+
+    with open(ENV_PATH, "w") as f:
+        f.writelines(lines)
+
+    subprocess.Popen(
+        ["sudo", "-n", "systemctl", "restart", "ccounter"],
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.DEVNULL,
+    )
+
+
 def read_status():
     """Läser status.json skriven av app.py. Returnerar (fps, stream_ok)."""
     try:
@@ -215,6 +256,23 @@ class Widget(Gtk.Window):
             background-color: #1e293b;
             min-height: 1px;
         }}
+        button.anpr-toggle {{
+            font-size: 11px;
+            font-weight: bold;
+            border-radius: 6px;
+            padding: 4px 0;
+            border: none;
+            box-shadow: none;
+            text-shadow: none;
+        }}
+        button.anpr-on {{
+            background-color: {GREEN};
+            color: #052e16;
+        }}
+        button.anpr-off {{
+            background-color: {RED};
+            color: #450a0a;
+        }}
         """
         provider = Gtk.CssProvider()
         provider.load_from_data(css.encode())
@@ -265,6 +323,13 @@ class Widget(Gtk.Window):
         plates_row.pack_end(self.lbl_queue, False, False, 0)
         box.pack_start(plates_row, False, False, 2)
 
+        # --- Live-ANPR på/av-knapp ---
+        self.btn_anpr = Gtk.Button(label="LIVE-ANPR PÅ")
+        self.btn_anpr.get_style_context().add_class("anpr-toggle")
+        self.btn_anpr.set_relief(Gtk.ReliefStyle.NONE)
+        self.btn_anpr.connect("clicked", self._on_anpr_toggle)
+        box.pack_start(self.btn_anpr, False, False, 6)
+
         # --- FPS + Uptime rad ---
         meta = Gtk.Box(orientation=Gtk.Orientation.HORIZONTAL, spacing=0)
         self.lbl_fps = Gtk.Label(label="FPS: —")
@@ -314,8 +379,41 @@ class Widget(Gtk.Window):
         ctx.paint()
 
     def _on_press(self, widget, event):
-        if event.button == 1:
-            self.begin_move_drag(event.button, int(event.x_root), int(event.y_root), event.time)
+        if event.button != 1:
+            return
+        # Starta inte fönster-drag om klicket landade på knappen - annars
+        # kapar drag-hanteringen klicket innan knappens "clicked" hinner fyras.
+        ok, bx, by = self.btn_anpr.translate_coordinates(self, 0, 0)
+        if ok:
+            alloc = self.btn_anpr.get_allocation()
+            if bx <= event.x <= bx + alloc.width and by <= event.y <= by + alloc.height:
+                return
+        self.begin_move_drag(event.button, int(event.x_root), int(event.y_root), event.time)
+
+    def _on_anpr_toggle(self, widget):
+        enabled = read_live_anpr_enabled()
+        new_state = not enabled
+        set_live_anpr_enabled(new_state)
+        self.btn_anpr.set_sensitive(False)
+        self.btn_anpr.set_label("STARTAR OM...")
+        GLib.timeout_add_seconds(6, self._reenable_anpr_button)
+
+    def _reenable_anpr_button(self):
+        self.btn_anpr.set_sensitive(True)
+        self._update_anpr_button()
+        return False
+
+    def _update_anpr_button(self):
+        enabled = read_live_anpr_enabled()
+        sc = self.btn_anpr.get_style_context()
+        if enabled:
+            sc.remove_class("anpr-off")
+            sc.add_class("anpr-on")
+            self.btn_anpr.set_label("LIVE-ANPR PÅ")
+        else:
+            sc.remove_class("anpr-on")
+            sc.add_class("anpr-off")
+            self.btn_anpr.set_label("LIVE-ANPR AV")
 
     def _on_configure(self, widget, event):
         try:
@@ -328,6 +426,10 @@ class Widget(Gtk.Window):
     def refresh(self):
         count, plates_read, anpr_queue, uptime_pct, plates = query_db()
         fps, stream_ok = read_status()
+
+        # Live-ANPR-knapp - hoppa över medan en omstart pågår
+        if self.btn_anpr.get_sensitive():
+            self._update_anpr_button()
 
         # Räknare
         self.lbl_count.set_text(str(count) if count is not None else "?")
