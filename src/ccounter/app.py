@@ -32,6 +32,7 @@ from src.ccounter.config import (
     PLATE_MIN_CONFIDENCE,
     PLATE_READER_GPU,
     PLATE_READER_SHARPNESS_THRESHOLD,
+    LIVE_ANPR_ENABLED,
 )
 from src.ccounter.database import Database
 from src.ccounter.tracker import CentroidTracker
@@ -581,7 +582,7 @@ def _write_status(
     status_path = os.path.join(os.path.dirname(db_path), "status.json")
 
     vram_mb = None
-    if PLATE_READER_GPU:
+    if PLATE_READER_GPU and LIVE_ANPR_ENABLED:
         try:
             import torch
 
@@ -649,7 +650,7 @@ def main() -> None:
         max_missing_frames=TRACKER_MAX_MISSING_FRAMES,
     )
 
-    if PLATE_READER_GPU:
+    if PLATE_READER_GPU and LIVE_ANPR_ENABLED:
         # Utan hård gräns växer PyTorch-allokatorns cache obegränsat över
         # timmar/dagar (observerat: 1 GB -> 4+ GB), vilket kan svälta ut
         # anpr_worker när den startar sin egen GPU-kontext varje timme.
@@ -660,7 +661,13 @@ def main() -> None:
         print(f"GPU-minnesgräns satt: 50% ({torch.cuda.get_device_properties(0).total_memory / 1024**3 * 0.5:.1f} GB)")
 
     line_counter = MultiLineCounter(LINES)
-    plate_ocr_worker = PlateOCRWorker()
+    # I paus-läge laddas EasyOCR aldrig i den här processen - GPU:n blir
+    # helt fri. Fordonsräkning och crop-sparning (för anpr_worker senare)
+    # fortsätter opåverkat, plate_ocr_worker=None hanteras redan säkert
+    # nedströms i handle_passages().
+    plate_ocr_worker = PlateOCRWorker() if LIVE_ANPR_ENABLED else None
+    if not LIVE_ANPR_ENABLED:
+        print("Live-ANPR AVSTÄNGD (paus-läge) - GPU fri, räknar bara fordon.")
     best_crops = BestCropTracker()
 
     cap = open_stream(RTSP_URL)
@@ -704,12 +711,14 @@ def main() -> None:
                     continue
                 if obj["class_name"] not in vehicle_classes:
                     continue
-                plate_ocr_worker.submit(object_id, frame, obj["bbox"])
+                if plate_ocr_worker is not None:
+                    plate_ocr_worker.submit(object_id, frame, obj["bbox"])
                 best_crops.update(object_id, frame, obj["bbox"])
 
             # Rensa IDs som försvunnit ur trackern
             for removed_id in old_ids - set(tracked_objects.keys()):
-                plate_ocr_worker.remove(removed_id)
+                if plate_ocr_worker is not None:
+                    plate_ocr_worker.remove(removed_id)
                 best_crops.remove(removed_id)
 
             handle_passages(
@@ -742,7 +751,7 @@ def main() -> None:
                     DATABASE_PATH,
                     fps=fps,
                     stream="up",
-                    ocr_queue=plate_ocr_worker._q.qsize(),
+                    ocr_queue=plate_ocr_worker._q.qsize() if plate_ocr_worker is not None else 0,
                     snapshot_queue=_snapshot_q.qsize(),
                 )
 
