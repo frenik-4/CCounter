@@ -482,6 +482,24 @@ def get_event_type(line_name: str) -> str:
 
     return "road_passage"
 
+
+PARKING_LINE_NAMES = ("parking_entry_line", "parking_exit_line")
+
+# Minne för att veta om ett fordon nyligen svängt in/ut mot parkeringen, så
+# att samma sväng inte också räknas som genomfartstrafik om den råkar korsa
+# huvudlinjen i en tidigare/senare bildruta än parkeringslinjen. Rensas
+# löpande så den inte växer obegränsat under lång drifttid.
+_recent_parking_crossings: dict[int, float] = {}
+PARKING_CROSSING_MEMORY_SECONDS = 8.0
+
+
+def _prune_recent_parking_crossings() -> None:
+    cutoff = time.time() - PARKING_CROSSING_MEMORY_SECONDS
+    stale = [oid for oid, ts in _recent_parking_crossings.items() if ts < cutoff]
+    for oid in stale:
+        del _recent_parking_crossings[oid]
+
+
 def handle_passages(
     db: Database,
     frame,
@@ -500,6 +518,12 @@ def handle_passages(
             current_point=obj["center"],
         )
 
+        if not crossings:
+            continue
+
+        crossed_lines_this_batch = {c["line_name"] for c in crossings}
+        turning_to_parking = any(ln in PARKING_LINE_NAMES for ln in crossed_lines_this_batch)
+
         for crossing in crossings:
             line_name = crossing["line_name"]
             direction = crossing["direction"]
@@ -508,6 +532,21 @@ def handle_passages(
                 object_class=obj["class_name"],
                 line_name=line_name,
             )
+
+            if line_name in PARKING_LINE_NAMES:
+                _recent_parking_crossings[object_id] = time.time()
+                _prune_recent_parking_crossings()
+            elif final_category == "road_traffic":
+                # Samma fordon korsade en parkeringslinje i samma sväng
+                # (eller för någon sekund sedan) - det är en in-/utsväng
+                # mot garaget/parkeringen, inte genomfartstrafik.
+                recently_parked = (
+                    object_id in _recent_parking_crossings
+                    and time.time() - _recent_parking_crossings[object_id]
+                    <= PARKING_CROSSING_MEMORY_SECONDS
+                )
+                if turning_to_parking or recently_parked:
+                    final_category = "parking_traffic"
 
             # Hämta bästa skyltläsning från live-OCR-tråden.
             plate_text = None
