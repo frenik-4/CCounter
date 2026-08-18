@@ -38,7 +38,6 @@ from src.ccounter.database import Database
 from src.ccounter.tracker import CentroidTracker
 from src.ccounter.counter import MultiLineCounter
 from src.ccounter.classifier import classify_object
-from src.ccounter.config import ANPR_MIN_BBOX_WIDTH, PLATE_CAPTURE_Y, PLATE_CAPTURE_Y_TOLERANCE
 from src.ccounter.ov_detector import OVDetector
 from src.ccounter.plate_reader import PlateReader
 from src.ccounter.track_plate_manager import TrackPlateManager, PlateCandidate
@@ -294,95 +293,6 @@ def save_passage_snapshot(
     return snapshot_path
 
 
-class BestCropTracker:
-    """
-    Spårar den skarpaste fordonscroppen per track ID i realtid — ingen OCR.
-    Används för att ge anpr_worker bästa möjliga bildunderlag vid korsning.
-    """
-
-    VEHICLE_CLASSES = {"car", "truck", "bus", "motorcycle"}
-
-    MIN_BBOX_WIDTH = ANPR_MIN_BBOX_WIDTH
-
-    TOP_N = 5
-    CAPTURE_Y = PLATE_CAPTURE_Y
-    CAPTURE_Y_TOLERANCE = PLATE_CAPTURE_Y_TOLERANCE
-
-    def __init__(self) -> None:
-        self._candidates: dict[int, list[tuple[float, np.ndarray]]] = {}
-        self._y_triggered: set[int] = set()
-
-    def update(self, track_id: int, frame, bbox: tuple[int, int, int, int]) -> None:
-        x1, y1, x2, y2 = bbox
-        fh, fw = frame.shape[:2]
-        w = x2 - x1
-        h = y2 - y1
-
-        # Hoppa över frames där fordonet är för smalt i bild — t.ex. när det
-        # precis dyker upp bakom vegetation och knappt är synligt. Utan detta
-        # väljs ofta det allra första frame med hög kantkontrast (strålkastare
-        # mot mörk bakgrund) trots att skylten inte alls är synlig.
-        if w < self.MIN_BBOX_WIDTH:
-            return
-
-        # Horisontell padding: 5 % på varje sida.
-        # Vertikal padding nedtill: 15 % extra — fångar frontplåten som
-        # ofta hamnar precis under YOLO-bbox vid frontala genomkörningar.
-        padding_x = int(w * 0.05)
-        padding_y_bottom = int(h * 0.15)
-
-        cx1 = max(0, x1 - padding_x)
-        cx2 = min(fw, x2 + padding_x)
-        cy1 = max(0, y1)
-        cy2 = min(fh, y2 + padding_y_bottom)
-
-        if cx2 <= cx1 or cy2 <= cy1:
-            return
-
-        crop = frame[cy1:cy2, cx1:cx2]
-
-        # Skärpemätning på den tight (opadded) delen — undvik att bakgrunden
-        # under bilen påverkar Laplacian-variansen.
-        tight = frame[max(0, y1):min(fh, y2), max(0, x1):min(fw, x2)]
-        if tight.size == 0:
-            return
-        gray = cv2.cvtColor(tight, cv2.COLOR_BGR2GRAY)
-
-        # Klippa övermättade pixlar (strålkastare, IR-reflex) innan skärpemätning.
-        # Utan klippning dominerar ljuskällor Laplacian-variansen trots att bilden
-        # i övrigt är rörelseoskarp — särskilt påtagligt på natten.
-        gray_clipped = np.clip(gray, 0, 180)
-        sharpness = float(cv2.Laplacian(gray_clipped, cv2.CV_64F).var())
-
-        # Positionsbaserad trigger: om fordonet är på optimal Y-position
-        # får framen maxprioritet och hamnar alltid först i top-N.
-        center_y = (y1 + y2) // 2
-        if (
-            self.CAPTURE_Y > 0
-            and track_id not in self._y_triggered
-            and abs(center_y - self.CAPTURE_Y) <= self.CAPTURE_Y_TOLERANCE
-        ):
-            self._y_triggered.add(track_id)
-            sharpness = 1e9
-
-        candidates = self._candidates.setdefault(track_id, [])
-        candidates.append((sharpness, crop.copy()))
-        candidates.sort(key=lambda x: -x[0])
-        if len(candidates) > self.TOP_N:
-            candidates.pop()
-
-    def get_all(self, track_id: int) -> list[np.ndarray]:
-        return [crop for _, crop in self._candidates.get(track_id, [])]
-
-    def get(self, track_id: int) -> np.ndarray | None:
-        crops = self.get_all(track_id)
-        return crops[0] if crops else None
-
-    def remove(self, track_id: int) -> None:
-        self._candidates.pop(track_id, None)
-        self._y_triggered.discard(track_id)
-
-
 class PlateOCRWorker:
     """
     Kör EasyOCR i en bakgrundstråd så att OCR-anrop (1–3 s) inte blockerar
@@ -506,7 +416,6 @@ def handle_passages(
     tracked_objects: dict[int, dict],
     line_counter: MultiLineCounter,
     plate_ocr_worker: "PlateOCRWorker | None" = None,
-    best_crops: "BestCropTracker | None" = None,
 ) -> None:
     for object_id, obj in tracked_objects.items():
         if obj.get("missing", 0) > 0:
@@ -566,17 +475,6 @@ def handle_passages(
                     line_name=line_name,
                     direction=direction,
                 )
-
-                # Spara de skarpaste fordonscropparna som _anpr1-5.jpg —
-                # anpr_worker provar dessa först och får betydligt bättre
-                # bildunderlag än en retroaktiv crop ur fullbilden.
-                if best_crops is not None:
-                    for i, crop in enumerate(best_crops.get_all(object_id), start=1):
-                        crop_path = snapshot_path.replace(".jpg", f"_anpr{i}.jpg")
-                        try:
-                            _snapshot_q.put_nowait((crop_path, crop))
-                        except queue.Full:
-                            cv2.imwrite(crop_path, crop)
 
             db.insert_event(
                 event_type=event_type,
@@ -701,13 +599,11 @@ def main() -> None:
 
     line_counter = MultiLineCounter(LINES)
     # I paus-läge laddas EasyOCR aldrig i den här processen - GPU:n blir
-    # helt fri. Fordonsräkning och crop-sparning (för anpr_worker senare)
-    # fortsätter opåverkat, plate_ocr_worker=None hanteras redan säkert
-    # nedströms i handle_passages().
+    # helt fri. Fordonsräkning fortsätter opåverkat, plate_ocr_worker=None
+    # hanteras redan säkert nedströms i handle_passages().
     plate_ocr_worker = PlateOCRWorker() if LIVE_ANPR_ENABLED else None
     if not LIVE_ANPR_ENABLED:
         print("Live-ANPR AVSTÄNGD (paus-läge) - GPU fri, räknar bara fordon.")
-    best_crops = BestCropTracker()
 
     cap = open_stream(RTSP_URL)
     db.log_stream_event("up")
@@ -752,13 +648,11 @@ def main() -> None:
                     continue
                 if plate_ocr_worker is not None:
                     plate_ocr_worker.submit(object_id, frame, obj["bbox"])
-                best_crops.update(object_id, frame, obj["bbox"])
 
             # Rensa IDs som försvunnit ur trackern
             for removed_id in old_ids - set(tracked_objects.keys()):
                 if plate_ocr_worker is not None:
                     plate_ocr_worker.remove(removed_id)
-                best_crops.remove(removed_id)
 
             handle_passages(
                 db=db,
@@ -766,7 +660,6 @@ def main() -> None:
                 tracked_objects=tracked_objects,
                 line_counter=line_counter,
                 plate_ocr_worker=plate_ocr_worker,
-                best_crops=best_crops,
             )
 
             if frame_count % 150 == 0:
