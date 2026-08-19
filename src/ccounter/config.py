@@ -167,11 +167,11 @@ PLATE_CAPTURE_Y_TOLERANCE = int(os.getenv("PLATE_CAPTURE_Y_TOLERANCE", "80"))
 PLATE_MIN_CONFIDENCE = float(os.getenv("PLATE_MIN_CONFIDENCE", "0.30"))
 PLATE_READER_GPU = get_bool("PLATE_READER_GPU", False)
 
-# Paus-läge: stänger av live-skyltläsning helt (laddar aldrig EasyOCR i denna
-# process) så GPU:n blir helt fri, t.ex. för spel. Fordonsräkning (YOLO/iGPU)
-# och sparande av skarpaste crops fortsätter som vanligt - anpr_worker betar
-# av all skyltläsning i efterhand när läget slås av igen.
-LIVE_ANPR_ENABLED = get_bool("LIVE_ANPR_ENABLED", True)
+# Standard AV - ren trafikräkning, ingen live-skyltläsning (laddar aldrig
+# EasyOCR i denna process), så GPU:n är fri för andra saker (Ollama m.m.).
+# Fordonsräkning (YOLO/iGPU) fortsätter som vanligt oavsett. Slå på
+# tillfälligt via widgetens knapp vid behov.
+LIVE_ANPR_ENABLED = get_bool("LIVE_ANPR_ENABLED", False)
 PLATE_READER_SHARPNESS_THRESHOLD = float(os.getenv("PLATE_READER_SHARPNESS_THRESHOLD", "80.0"))
 
 if not RTSP_URL:
