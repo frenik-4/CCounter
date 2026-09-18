@@ -127,6 +127,24 @@ class Database:
             """
         )
 
+        # Kommentarer per dag, t.ex. "Discgolf-tävling på Ale" - för att kunna
+        # jämföra trafiken mot kända händelser i statistikuttag.
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS day_comments (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+
+                date TEXT NOT NULL,
+                comment TEXT NOT NULL,
+                source TEXT,
+
+                created_at TEXT NOT NULL,
+
+                UNIQUE(date, comment)
+            );
+            """
+        )
+
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);"
         )
@@ -330,6 +348,34 @@ class Database:
             """
         )
         return int(cursor.fetchone()[0])
+
+    def add_day_comment(
+        self,
+        date: str,
+        comment: str,
+        source: str | None = None,
+    ) -> None:
+        now = datetime.now().isoformat(timespec="seconds")
+        self.conn.execute(
+            """
+            INSERT OR IGNORE INTO day_comments (date, comment, source, created_at)
+            VALUES (?, ?, ?, ?);
+            """,
+            (date, comment, source, now),
+        )
+        self.conn.commit()
+
+    def get_day_comments(
+        self, start_date: str | None = None, end_date: str | None = None
+    ) -> list:
+        query = "SELECT date, comment, source FROM day_comments"
+        params: tuple = ()
+        if start_date and end_date:
+            query += " WHERE date BETWEEN ? AND ?"
+            params = (start_date, end_date)
+        query += " ORDER BY date;"
+        cursor = self.conn.execute(query, params)
+        return cursor.fetchall()
 
     def close(self) -> None:
         self.conn.close()
