@@ -22,20 +22,18 @@ Körs ändå (som ren avläsning/loggning) så trenden syns över dygnet.
 
 import json
 import os
-import ssl
 import time
-import urllib.request
 from datetime import datetime
 
-import cv2
-import numpy as np
-
-from src.ccounter.config import (
-    CAM_PSWD,
-    CAM_URL,
-    CAM_USER,
-    FOCUS_REGION,
-    PLATE_READER_SHARPNESS_THRESHOLD,
+from src.ccounter.config import FOCUS_REGION, PLATE_READER_SHARPNESS_THRESHOLD
+from src.ccounter.reolink_client import (
+    get_snapshot,
+    get_zoom_focus,
+    is_ir_mode,
+    login,
+    logout,
+    set_focus_pos,
+    sharpness_score,
 )
 
 STATE_PATH = "data/camera_focus_state.jsonl"
@@ -46,8 +44,6 @@ MAX_STEPS_PER_DIRECTION = 4
 MIN_IMPROVEMENT_RATIO = 1.05  # kräv minst 5% bättre skärpa innan fokus flyttas
 SETTLE_SECONDS = 1.5
 
-_SSL_CTX = ssl._create_unverified_context()
-
 
 def log(message: str) -> None:
     line = f"{datetime.now().isoformat(timespec='seconds')} {message}"
@@ -57,89 +53,6 @@ def log(message: str) -> None:
         f.write(line + "\n")
 
 
-def _api_url(cmd: str) -> str:
-    return f"{CAM_URL}/cgi-bin/api.cgi?cmd={cmd}"
-
-
-def _get(cmd: str, token: str | None = None) -> dict:
-    url = _api_url(cmd)
-    if token:
-        url += f"&token={token}"
-    with urllib.request.urlopen(url, timeout=15, context=_SSL_CTX) as resp:
-        return json.loads(resp.read())
-
-
-def _post(cmd: str, payload: list, token: str | None = None) -> dict:
-    url = _api_url(cmd)
-    if token:
-        url += f"&token={token}"
-    req = urllib.request.Request(
-        url,
-        data=json.dumps(payload).encode(),
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(req, timeout=15, context=_SSL_CTX) as resp:
-        return json.loads(resp.read())
-
-
-def login() -> str:
-    result = _post(
-        "Login",
-        [
-            {
-                "cmd": "Login",
-                "action": 0,
-                "param": {"User": {"userName": CAM_USER, "password": CAM_PSWD}},
-            }
-        ],
-    )
-    return result[0]["value"]["Token"]["name"]
-
-
-def get_zoom_focus(token: str) -> dict:
-    result = _get("GetZoomFocus", token)
-    return result[0]["value"]["ZoomFocus"]
-
-
-def set_focus_pos(token: str, pos: int) -> bool:
-    result = _post(
-        "StartZoomFocus",
-        [
-            {
-                "cmd": "StartZoomFocus",
-                "action": 0,
-                "param": {"ZoomFocus": {"channel": 0, "op": "FocusPos", "pos": pos}},
-            }
-        ],
-        token,
-    )
-    return result[0].get("code") == 0
-
-
-def get_snapshot(token: str):
-    url = _api_url("Snap") + f"&channel=0&rs={int(time.time() * 1000)}&token={token}"
-    with urllib.request.urlopen(url, timeout=15, context=_SSL_CTX) as resp:
-        data = resp.read()
-    arr = np.frombuffer(data, dtype=np.uint8)
-    return cv2.imdecode(arr, cv2.IMREAD_COLOR)
-
-
-def is_ir_mode(img) -> bool:
-    b, g, r = (channel.astype(np.int16) for channel in cv2.split(img))
-    diff = float(np.mean(np.abs(b - g)) + np.mean(np.abs(g - r)) + np.mean(np.abs(b - r)))
-    return diff < 6.0
-
-
-def sharpness_score(img, region: tuple[int, int, int, int]) -> float:
-    x1, y1, x2, y2 = region
-    h, w = img.shape[:2]
-    x1, x2 = max(0, x1), min(w, x2)
-    y1, y2 = max(0, y1), min(h, y2)
-    crop = img[y1:y2, x1:x2]
-    gray = cv2.cvtColor(crop, cv2.COLOR_BGR2GRAY)
-    return float(cv2.Laplacian(gray, cv2.CV_64F).var())
-
-
 def save_state(entry: dict) -> None:
     os.makedirs(os.path.dirname(STATE_PATH) or ".", exist_ok=True)
     with open(STATE_PATH, "a") as f:
@@ -147,12 +60,20 @@ def save_state(entry: dict) -> None:
 
 
 def run() -> None:
-    if not CAM_URL or not CAM_USER:
-        log("CAM/CAM_USER/CAM_PSWD saknas i .env - avbryter.")
+    try:
+        token = login()
+    except Exception as exc:
+        log(f"Kunde inte nå kameran: {exc}")
         return
 
     try:
-        token = login()
+        _run_with_token(token)
+    finally:
+        logout(token)
+
+
+def _run_with_token(token: str) -> None:
+    try:
         img = get_snapshot(token)
     except Exception as exc:
         log(f"Kunde inte nå kameran: {exc}")
@@ -185,7 +106,6 @@ def run() -> None:
     best_score = baseline_score
 
     for direction in (1, -1):
-        pos = start_pos
         for step in range(1, MAX_STEPS_PER_DIRECTION + 1):
             pos = start_pos + direction * FOCUS_STEP * step
             try:
@@ -213,16 +133,14 @@ def run() -> None:
             f"Klart. Flyttade fokus {start_pos} -> {best_pos} "
             f"(skärpa {baseline_score:.0f} -> {best_score:.0f})."
         )
-        result_pos = best_pos
-        result_score = best_score
+        result_pos, result_score = best_pos, best_score
     else:
         set_focus_pos(token, start_pos)
         log(
             f"Ingen tillräcklig förbättring (bäst hittad: {best_pos}={best_score:.0f}). "
             f"Behåller {start_pos}."
         )
-        result_pos = start_pos
-        result_score = baseline_score
+        result_pos, result_score = start_pos, baseline_score
 
     save_state(
         {
