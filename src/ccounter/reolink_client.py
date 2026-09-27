@@ -126,19 +126,31 @@ def set_isp(token: str, fields: dict) -> bool:
 
 
 def get_snapshot(token: str):
-    for attempt in range(2):
-        url = _api_url("Snap") + f"&channel=0&rs={int(time.time() * 1000)}&token={token}"
-        with urllib.request.urlopen(url, timeout=15, context=_SSL_CTX) as resp:
-            data = resp.read()
+    last_error = None
 
-        if data[:2] == b"\xff\xd8":  # JPEG magic bytes = giltig bild
-            arr = np.frombuffer(data, dtype=np.uint8)
-            return cv2.imdecode(arr, cv2.IMREAD_COLOR)
+    for attempt in range(2):
+        try:
+            url = _api_url("Snap") + f"&channel=0&rs={int(time.time() * 1000)}&token={token}"
+            with urllib.request.urlopen(url, timeout=15, context=_SSL_CTX) as resp:
+                data = resp.read()
+
+            if data[:2] == b"\xff\xd8":  # JPEG magic bytes = giltig bild
+                arr = np.frombuffer(data, dtype=np.uint8)
+                img = cv2.imdecode(arr, cv2.IMREAD_COLOR)
+                if img is not None:
+                    return img
+                last_error = "cv2.imdecode gav None trots giltiga JPEG-headers"
+            else:
+                last_error = f"inget JPEG-svar: {data[:200]!r}"
+        except Exception as exc:
+            # Nätverksfel (timeout, connection reset) ska också ge samma
+            # omförsök som ett tillfälligt API-fel, inte kasta direkt.
+            last_error = str(exc)
 
         if attempt == 0:
-            time.sleep(2)  # troligen samma tillfälliga fel som _get/_post ser
+            time.sleep(2)
 
-    raise RuntimeError(f"Snap gav inget JPEG-svar: {data[:200]!r}")
+    raise RuntimeError(f"Snap misslyckades: {last_error}")
 
 
 def is_ir_mode(img) -> bool:

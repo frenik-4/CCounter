@@ -42,6 +42,7 @@ LOG_PATH = "data/camera_focus.log"
 FOCUS_STEP = 15
 MAX_STEPS_PER_DIRECTION = 4
 MIN_IMPROVEMENT_RATIO = 1.05  # kräv minst 5% bättre skärpa innan fokus flyttas
+MIN_ABSOLUTE_IMPROVEMENT = 10.0  # skydd mot near-noll-baslinje (t.ex. helt svart bild)
 SETTLE_SECONDS = 1.5
 
 
@@ -127,30 +128,41 @@ def _run_with_token(token: str) -> None:
             else:
                 break
 
-    if best_pos != start_pos and best_score >= baseline_score * MIN_IMPROVEMENT_RATIO:
-        set_focus_pos(token, best_pos)
-        log(
-            f"Klart. Flyttade fokus {start_pos} -> {best_pos} "
-            f"(skärpa {baseline_score:.0f} -> {best_score:.0f})."
-        )
-        result_pos, result_score = best_pos, best_score
-    else:
-        set_focus_pos(token, start_pos)
-        log(
-            f"Ingen tillräcklig förbättring (bäst hittad: {best_pos}={best_score:.0f}). "
-            f"Behåller {start_pos}."
-        )
-        result_pos, result_score = start_pos, baseline_score
-
-    save_state(
-        {
-            "timestamp": datetime.now().isoformat(timespec="seconds"),
-            "start_pos": start_pos,
-            "result_pos": result_pos,
-            "baseline_score": baseline_score,
-            "result_score": result_score,
-        }
+    improved_enough = (
+        best_pos != start_pos
+        and best_score >= baseline_score * MIN_IMPROVEMENT_RATIO
+        and (best_score - baseline_score) >= MIN_ABSOLUTE_IMPROVEMENT
     )
+
+    try:
+        if improved_enough:
+            set_focus_pos(token, best_pos)
+            log(
+                f"Klart. Flyttade fokus {start_pos} -> {best_pos} "
+                f"(skärpa {baseline_score:.0f} -> {best_score:.0f})."
+            )
+            result_pos, result_score = best_pos, best_score
+        else:
+            set_focus_pos(token, start_pos)
+            log(
+                f"Ingen tillräcklig förbättring (bäst hittad: {best_pos}={best_score:.0f}). "
+                f"Behåller {start_pos}."
+            )
+            result_pos, result_score = start_pos, baseline_score
+    except Exception as exc:
+        log(f"Kunde inte återställa/tillämpa slutligt fokusläge: {exc}")
+        result_pos, result_score = None, None
+
+    if result_pos is not None:
+        save_state(
+            {
+                "timestamp": datetime.now().isoformat(timespec="seconds"),
+                "start_pos": start_pos,
+                "result_pos": result_pos,
+                "baseline_score": baseline_score,
+                "result_score": result_score,
+            }
+        )
 
 
 if __name__ == "__main__":

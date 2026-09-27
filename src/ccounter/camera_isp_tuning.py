@@ -44,6 +44,7 @@ LOG_PATH = "data/camera_isp_tuning.log"
 SETTLE_SECONDS = 4  # ge autoexponeringen tid att stabilisera innan mätning
 MIN_SCORE_RATIO_TO_KEEP = 0.97  # tillåt att behålla vid i princip oförändrad skärpa
 MAX_NOISE_RATIO = 3.0  # nr3d=0 gav ~18x - detta ger bred marginal ändå
+MIN_ABSOLUTE_SCORE_TO_TRUST = 5.0  # under detta är skärpemåttet för brusigt för att lita på
 
 # (isp-fält, nytt värde, vilket ljusläge det får testas i: "day"/"night"/"both")
 # Ordning = testprioritet. exposure=Manual utelämnat med avsikt (kräver att
@@ -235,7 +236,13 @@ def _run_with_token(token: str) -> None:
         f"Skärpa {baseline_score:.0f} -> {new_score:.0f}"
     )
 
-    if new_score >= baseline_score * MIN_SCORE_RATIO_TO_KEEP:
+    # Vid en väldigt låg baslinje (t.ex. helt statisk/svart scen) är
+    # kvotjämförelsen opålitlig - en obetydlig absolut skillnad kan se ut
+    # som en stor procentuell förändring åt endera hållet. Lita då bara på
+    # hälso-/brusspärrarna ovan istället för skärpekvoten.
+    baseline_unreliable = baseline_score < MIN_ABSOLUTE_SCORE_TO_TRUST
+
+    if baseline_unreliable or new_score >= baseline_score * MIN_SCORE_RATIO_TO_KEEP:
         log(f"  Behåller {field}={value}.")
         state["trials"][key] = {
             "outcome": "kept",
