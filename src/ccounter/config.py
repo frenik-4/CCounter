@@ -176,3 +176,24 @@ PLATE_READER_SHARPNESS_THRESHOLD = float(os.getenv("PLATE_READER_SHARPNESS_THRES
 
 if not RTSP_URL:
     raise ValueError("RTSP_URL saknas. Lägg den i .env")
+
+# Reolink-kamerans admin-API (separat från RTSP-strömmen) - används av
+# camera_focus.py för att läsa/justera fokus automatiskt.
+CAM_URL = os.getenv("CAM", "").rstrip("/")
+CAM_USER = os.getenv("CAM_USER", "")
+CAM_PSWD = os.getenv("CAM_PSWD", "")
+
+# Vägytan runt main_count_line (där fordon faktiskt räknas) - det är den
+# skärpan som spelar roll, inte hela bilden. Räknas ut automatiskt från
+# LINES med marginal, men går att hårdkoda via FOCUS_REGION i .env
+# ("x1,y1,x2,y2") om linjen någon gång flyttas utan att fokusregionen ska
+# följa med.
+def _default_focus_region() -> tuple[int, int, int, int]:
+    x1, y1, x2, y2 = LINES.get("main_count_line", (1789, 659, 2589, 1750))
+    cx = (x1 + x2) // 2
+    top = min(y1, y2) - 100
+    bottom = max(y1, y2) + 100
+    return (max(0, cx - 700), max(0, top), cx + 700, bottom)
+
+
+FOCUS_REGION = get_int_tuple("FOCUS_REGION", _default_focus_region())
