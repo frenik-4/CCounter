@@ -473,6 +473,96 @@
       white-space: nowrap;
     }
 
+    /* Månadskalender */
+    .month-nav {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      margin-bottom: 14px;
+    }
+
+    .month-nav-btn {
+      background: var(--card-soft);
+      color: var(--text);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 8px 14px;
+      font-size: 15px;
+      cursor: pointer;
+    }
+
+    .month-nav-btn:hover { background: rgba(255, 255, 255, 0.06); }
+    .month-nav-btn:disabled { opacity: 0.35; cursor: default; }
+
+    .month-nav-label {
+      font-weight: 700;
+      font-size: 16px;
+      text-transform: capitalize;
+    }
+
+    .month-grid-wrap {
+      overflow-x: auto;
+      padding-bottom: 4px;
+    }
+
+    .month-grid {
+      display: grid;
+      grid-template-columns: repeat(7, 1fr);
+      gap: 6px;
+      min-width: 480px;
+    }
+
+    .month-wd-label {
+      text-align: center;
+      color: var(--muted);
+      font-size: 12px;
+      padding-bottom: 4px;
+    }
+
+    .month-cell {
+      aspect-ratio: 1 / 1;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(31, 41, 55, 0.5);
+      padding: 6px;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      cursor: pointer;
+      position: relative;
+      transition: background 0.15s, border-color 0.15s;
+    }
+
+    .month-cell:hover { background: rgba(255, 255, 255, 0.06); }
+    .month-cell.empty { visibility: hidden; cursor: default; }
+    .month-cell.no-data { cursor: default; opacity: 0.45; }
+    .month-cell.selected { border-color: var(--amber); background: rgba(245, 158, 11, 0.1); }
+
+    .month-cell-date {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .month-cell-diff {
+      font-size: 15px;
+      font-weight: 700;
+      align-self: flex-end;
+    }
+
+    .diff-pos { color: var(--green); }
+    .diff-neg { color: #f87171; }
+    .diff-zero { color: var(--muted); }
+
+    .month-cell-event {
+      position: absolute;
+      top: 6px;
+      right: 6px;
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--amber);
+    }
+
     /* Excel-export */
     .export-controls {
       display: flex;
@@ -600,6 +690,15 @@
       .grid { grid-template-columns: 1fr; }
       h1 { font-size: 26px; }
       .bar-row { grid-template-columns: 110px 1fr 40px; }
+
+      .month-nav {
+        flex-wrap: wrap;
+        gap: 8px;
+        justify-content: center;
+      }
+
+      .month-nav-btn { padding: 8px 10px; font-size: 13px; }
+      .month-nav-label { width: 100%; text-align: center; order: -1; }
     }
   </style>
 </head>
@@ -675,6 +774,22 @@
         <div class="legend-item"><span class="uptime-dot uptime-none"></span> Ingen mätning</div>
       </div>
       <p class="week-note">Klicka på en dag för att visa detaljer.</p>
+    </section>
+
+    <section class="card section">
+      <h2>Månadskalender</h2>
+      <div class="month-nav">
+        <button class="month-nav-btn" id="monthPrev" type="button">&larr; Föregående</button>
+        <div class="month-nav-label" id="monthLabel">–</div>
+        <button class="month-nav-btn" id="monthNext" type="button">Nästa &rarr;</button>
+      </div>
+      <div class="month-grid-wrap"><div class="month-grid" id="monthCalendar"></div></div>
+      <p class="week-note">
+        Siffran visar avvikelse mot medianen för samma veckodag (t.ex. alla onsdagar).
+        <span class="diff-pos">Grönt</span> = mer trafik än vanligt,
+        <span class="diff-neg">rött</span> = mindre. <span class="uptime-dot" style="background:var(--amber);display:inline-block;vertical-align:middle"></span> = känd händelse den dagen.
+        Klicka på en dag för att se detaljer.
+      </p>
     </section>
 
     <section class="card section">
@@ -1010,6 +1125,126 @@
       });
     }
 
+    // ── Månadskalender ───────────────────────────────────────────────────────
+
+    let calendarYear = null;
+    let calendarMonth = null; // 0-indexed, som JS Date
+
+    const MONTH_NAMES = [
+      "Januari", "Februari", "Mars", "April", "Maj", "Juni",
+      "Juli", "Augusti", "September", "Oktober", "November", "December",
+    ];
+    const MONTH_WD_LABELS = ["Mån", "Tis", "Ons", "Tor", "Fre", "Lör", "Sön"];
+
+    function diffClass(diff) {
+      if (diff === null || diff === undefined) return "diff-zero";
+      if (diff > 0) return "diff-pos";
+      if (diff < 0) return "diff-neg";
+      return "diff-zero";
+    }
+
+    function formatDiff(diff) {
+      if (diff === null || diff === undefined) return "–";
+      if (diff === 0) return "±0";
+      return diff > 0 ? `+${diff}` : `${diff}`;
+    }
+
+    function renderMonthCalendar(stats, selectedDate) {
+      const grid = document.getElementById("monthCalendar");
+      const label = document.getElementById("monthLabel");
+      if (!grid || !label || calendarYear === null) return;
+
+      label.textContent = `${MONTH_NAMES[calendarMonth]} ${calendarYear}`;
+      grid.innerHTML = "";
+
+      for (const wd of MONTH_WD_LABELS) {
+        const el = document.createElement("div");
+        el.className = "month-wd-label";
+        el.textContent = wd;
+        grid.appendChild(el);
+      }
+
+      const firstOfMonth = new Date(calendarYear, calendarMonth, 1);
+      // JS getDay(): 0=söndag. Vi vill ha måndag först, så räkna om till 0=måndag.
+      const leadingBlanks = (firstOfMonth.getDay() + 6) % 7;
+      const daysInMonth = new Date(calendarYear, calendarMonth + 1, 0).getDate();
+
+      for (let i = 0; i < leadingBlanks; i++) {
+        const blank = document.createElement("div");
+        blank.className = "month-cell empty";
+        grid.appendChild(blank);
+      }
+
+      for (let dayNum = 1; dayNum <= daysInMonth; dayNum++) {
+        const dateStr = `${calendarYear}-${String(calendarMonth + 1).padStart(2, "0")}-${String(dayNum).padStart(2, "0")}`;
+        const day = stats.days?.[dateStr];
+
+        const cell = document.createElement("div");
+        cell.className = "month-cell";
+        if (!day) cell.classList.add("no-data");
+        if (dateStr === selectedDate) cell.classList.add("selected");
+
+        const diff = day?.vs_weekday_median;
+        const hasEvent = day?.comments && day.comments.length > 0;
+
+        cell.innerHTML = `
+          <div class="month-cell-date">${dayNum}</div>
+          ${day ? `<div class="month-cell-diff ${diffClass(diff)}">${formatDiff(diff)}</div>` : ""}
+          ${hasEvent ? `<div class="month-cell-event" title="${day.comments.join('\n')}"></div>` : ""}
+        `;
+
+        if (day) {
+          cell.title = hasEvent
+            ? `${dateStr}\n${day.road_traffic} fordon (${formatDiff(diff)} mot normalt)\n${day.comments.join("\n")}`
+            : `${dateStr}\n${day.road_traffic} fordon (${formatDiff(diff)} mot normalt)`;
+          cell.addEventListener("click", () => {
+            document.getElementById("dateSelect").value = dateStr;
+            renderDay(dateStr);
+          });
+        }
+
+        grid.appendChild(cell);
+      }
+
+      const dates = stats.available_dates || [];
+      const prevBtn = document.getElementById("monthPrev");
+      const nextBtn = document.getElementById("monthNext");
+      if (dates.length > 0 && prevBtn && nextBtn) {
+        const minMonth = dates[0].slice(0, 7);
+        const maxMonth = dates[dates.length - 1].slice(0, 7);
+        const thisMonth = `${calendarYear}-${String(calendarMonth + 1).padStart(2, "0")}`;
+        prevBtn.disabled = thisMonth <= minMonth;
+        nextBtn.disabled = thisMonth >= maxMonth;
+      }
+    }
+
+    function setupMonthCalendar(stats, initialDate) {
+      if (calendarYear === null) {
+        const d = initialDate ? new Date(initialDate + "T12:00:00") : new Date();
+        calendarYear = d.getFullYear();
+        calendarMonth = d.getMonth();
+      }
+
+      const prevBtn = document.getElementById("monthPrev");
+      const nextBtn = document.getElementById("monthNext");
+      if (prevBtn && !prevBtn.dataset.wired) {
+        prevBtn.dataset.wired = "1";
+        prevBtn.addEventListener("click", () => {
+          calendarMonth -= 1;
+          if (calendarMonth < 0) { calendarMonth = 11; calendarYear -= 1; }
+          renderMonthCalendar(allStats, document.getElementById("dateSelect").value);
+        });
+      }
+      if (nextBtn && !nextBtn.dataset.wired) {
+        nextBtn.dataset.wired = "1";
+        nextBtn.addEventListener("click", () => {
+          calendarMonth += 1;
+          if (calendarMonth > 11) { calendarMonth = 0; calendarYear += 1; }
+          renderMonthCalendar(allStats, document.getElementById("dateSelect").value);
+        });
+      }
+    }
+
     // ── Kategorigrafen ────────────────────────────────────────────────────────
 
     function renderCategoryBars(categories) {
@@ -1200,6 +1435,7 @@
         setText("dirSouthPct", "");
         setText("dirNorthPct", "");
         renderEventBanner([]);
+        renderMonthCalendar(allStats, date);
         renderCategoryBars({});
         renderWeekChart(allStats, date);
         renderHourChart([]);
@@ -1222,6 +1458,7 @@
       setText("dirNorthPct", dirTotal > 0 ? `${Math.round((north / dirTotal) * 100)}%` : "");
 
       renderEventBanner(day.comments || []);
+      renderMonthCalendar(allStats, date);
 
       const peak = getPeakHour(day.hours || []);
       if (peak && peak.total > 0) {
@@ -1325,6 +1562,7 @@
         setupExportDates(allStats);
 
         const select = document.getElementById("dateSelect");
+        setupMonthCalendar(allStats, select.value);
         renderDay(select.value);
         renderWeekdayAverages(allStats.weekday_averages);
         updateStatus(allStats);
