@@ -171,6 +171,30 @@ def sharpness_score(img, region: tuple[int, int, int, int]) -> float:
     return float(cv2.Laplacian(gray, cv2.CV_64F).var())
 
 
+def measure_sharpness(
+    token: str,
+    region: tuple[int, int, int, int],
+    samples: int = 3,
+    spacing_seconds: float = 0.4,
+) -> float:
+    """
+    Ett enda foto är för brusigt att lita på för fokus-/ISP-beslut - vind
+    som rör löv/grenar i mätregionen kan tanka skärpepoängen i en enskild
+    bildruta även vid perfekt fokus (upptäckt vid felsökning 2026-09-28,
+    ~500 vid stilla ögonblick men enstaka prov ner mot ~10). Tar flera
+    prover och behåller det BÄSTA: ett vindstilla ögonblick som visar att
+    positionen faktiskt är skarp väger tyngre än att ett annat prov råkade
+    fångas mitt i ett vindkast.
+    """
+    scores = []
+    for i in range(samples):
+        img = get_snapshot(token)
+        scores.append(sharpness_score(img, region))
+        if i < samples - 1:
+            time.sleep(spacing_seconds)
+    return max(scores)
+
+
 def noise_score(img, region: tuple[int, int, int, int]) -> float:
     """
     Immerkærs brusuppskattning - mäter okorrelerat sensorbrus specifikt,
