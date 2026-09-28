@@ -63,7 +63,7 @@ def _post(cmd: str, payload: list, token: str | None = None) -> dict:
 
 
 def login() -> str:
-    if not CAM_URL or not CAM_USER:
+    if not CAM_URL or not CAM_USER or not CAM_PSWD:
         raise RuntimeError("CAM/CAM_USER/CAM_PSWD saknas i .env")
 
     result = _post(
