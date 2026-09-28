@@ -10,6 +10,7 @@ Regler:
 
 import json
 import os
+import statistics
 from datetime import datetime, timedelta
 
 from src.ccounter.config import DATABASE_PATH, EXPORT_MAX_DAYS
@@ -131,6 +132,7 @@ def main() -> None:
                     "road_dir_north": 0,
                     "categories": {},
                     "hours": {},
+                    "comments": [],
                 }
 
             day = days[date]
@@ -254,6 +256,16 @@ def main() -> None:
             elif direction == "B_TO_A":
                 days[date]["road_dir_north"] += count
 
+        # --- Pass 5: dagskommentarer (t.ex. discgolf-event) ---
+        comment_cursor = db.conn.execute(
+            "SELECT date, comment FROM day_comments ORDER BY date, comment;"
+        )
+        for row in comment_cursor:
+            date = row["date"]
+            if date not in days:
+                continue
+            days[date]["comments"].append(row["comment"])
+
         # --- Uptime per dag ---
         uptime_per_day: dict[str, float | None] = {
             date: calculate_daily_uptime(db.conn, date)
@@ -287,10 +299,44 @@ def main() -> None:
             for i in range(7)
         ]
 
+        # --- Median per veckodag, för kalenderns avvikelsesiffror ---
+        # Baslinjen räknas bara ur "normala" dagar: uptime >= 95% OCH ingen
+        # känd händelse (day_comments) den dagen, så t.ex. en discgolf-
+        # tävling inte drar upp sin egen jämförelsepunkt.
+        wd_samples: list[list[int]] = [[] for _ in range(7)]
+        for date, day in days.items():
+            uptime = uptime_per_day.get(date)
+            if uptime is None or uptime < 0.95 or day["comments"]:
+                continue
+            wd = datetime.strptime(date, "%Y-%m-%d").weekday()
+            wd_samples[wd].append(day["road_traffic"])
+
+        # Rådata (ej avrundad) används för avvikelseberäkningen nedan så att
+        # rundningsfel inte blandas ihop mellan median och diff; den
+        # avrundade varianten är bara till för visning/export.
+        weekday_medians_raw = [
+            statistics.median(samples) if samples else None
+            for samples in wd_samples
+        ]
+        weekday_medians = [
+            round(m, 1) if m is not None else None for m in weekday_medians_raw
+        ]
+
         # --- Bygg output ---
         output_days = {}
         for date, day in days.items():
             uptime = uptime_per_day.get(date)
+            wd = datetime.strptime(date, "%Y-%m-%d").weekday()
+            median_raw = weekday_medians_raw[wd]
+
+            # Dagens egen upptid måste också vara god - annars är dagens
+            # trafiksiffra i sig ett datahål (kameran låg nere), inte ett
+            # tecken på verkligen mindre trafik, och avvikelsen blir
+            # missvisande (t.ex. "-100" bara för att halva dagen saknas).
+            if median_raw is None or uptime is None or uptime < 0.95:
+                vs_median = None
+            else:
+                vs_median = round(day["road_traffic"] - median_raw)
             output_days[date] = {
                 "total": day["total"],
                 "road_traffic": day["road_traffic"],
@@ -303,6 +349,8 @@ def main() -> None:
                 "uptime_pct": round(uptime, 4) if uptime is not None else None,
                 "categories": day["categories"],
                 "hours": [hour for _, hour in sorted(day["hours"].items())],
+                "comments": day["comments"],
+                "vs_weekday_median": vs_median,
             }
 
         output = {
@@ -310,6 +358,7 @@ def main() -> None:
             "export_days": EXPORT_MAX_DAYS,
             "available_dates": sorted(available_dates),
             "weekday_averages": weekday_averages,
+            "weekday_medians": weekday_medians,
             "days": output_days,
         }
 
