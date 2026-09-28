@@ -14,6 +14,14 @@ track_plate_manager.py) i vägregionen kring main_count_line, och behåll
 bästa läget. Rör sig aldrig långt per körning och backar till
 ursprungsläget om inget bättre hittas.
 
+Lärdom från en verklig felsökning 2026-09-28: skärpezonen vid vägens
+avstånd är smal i fokusenheter (±15 hoppade konsekvent förbi den, rakt
+in i total oskärpa), och ETT enda foto per mätpunkt är dessutom brusigt
+- vind som rör löv/grenar i mätregionen kan tanka skärpepoängen i en
+enskild bildruta även vid perfekt fokus. Därför: mindre FOCUS_STEP, och
+varje mätpunkt tar flera prover och behåller det bästa istället för att
+lita på en enda bildruta.
+
 Nattläge (IR, gråskalebild) hoppas alltid över - fokusoptik för IR
 skiljer sig fysiskt från dagsljus och går inte att utvärdera meningsfullt
 med samma metod, plus att kameran redan gör sin egen IR-cut-omkoppling.
@@ -32,6 +40,7 @@ from src.ccounter.reolink_client import (
     is_ir_mode,
     login,
     logout,
+    measure_sharpness,
     set_focus_pos,
     sharpness_score,
 )
@@ -39,8 +48,8 @@ from src.ccounter.reolink_client import (
 STATE_PATH = "data/camera_focus_state.jsonl"
 LOG_PATH = "data/camera_focus.log"
 
-FOCUS_STEP = 15
-MAX_STEPS_PER_DIRECTION = 4
+FOCUS_STEP = 5
+MAX_STEPS_PER_DIRECTION = 3
 MIN_IMPROVEMENT_RATIO = 1.05  # kräv minst 5% bättre skärpa innan fokus flyttas
 MIN_ABSOLUTE_IMPROVEMENT = 10.0  # skydd mot near-noll-baslinje (t.ex. helt svart bild)
 SETTLE_SECONDS = 1.5
@@ -84,18 +93,19 @@ def _run_with_token(token: str) -> None:
         log("Snapshot gick inte att avkoda, avbryter.")
         return
 
-    baseline_score = sharpness_score(img, FOCUS_REGION)
-
     if is_ir_mode(img):
+        night_score = sharpness_score(img, FOCUS_REGION)
         log(
             f"IR/nattläge - hoppar över fokusjustering "
-            f"(skärpa just nu i vägregionen: {baseline_score:.0f})."
+            f"(skärpa just nu i vägregionen: {night_score:.0f})."
         )
         return
 
     zf = get_zoom_focus(token)
     start_pos = zf["focus"]["pos"]
     zoom_pos = zf["zoom"]["pos"]
+
+    baseline_score = measure_sharpness(token, FOCUS_REGION)
 
     log(
         f"Start: fokus={start_pos} zoom={zoom_pos} "
@@ -114,8 +124,7 @@ def _run_with_token(token: str) -> None:
                     log(f"  Kunde inte sätta fokus till {pos}, avbryter riktning.")
                     break
                 time.sleep(SETTLE_SECONDS)
-                probe_img = get_snapshot(token)
-                score = sharpness_score(probe_img, FOCUS_REGION)
+                score = measure_sharpness(token, FOCUS_REGION)
             except Exception as exc:
                 log(f"  Fel vid fokus={pos}: {exc}, avbryter riktning.")
                 break

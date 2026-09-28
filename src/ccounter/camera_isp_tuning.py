@@ -33,9 +33,9 @@ from src.ccounter.reolink_client import (
     is_ir_mode,
     login,
     logout,
+    measure_sharpness,
     noise_score,
     set_isp,
-    sharpness_score,
 )
 
 STATE_PATH = "data/camera_isp_state.json"
@@ -146,8 +146,10 @@ def _run_with_token(token: str) -> None:
 
     mode = "night" if is_ir_mode(img) else "day"
     _, baseline_note = exposure_health(img)
-    baseline_score = sharpness_score(img, FOCUS_REGION)
     baseline_noise = noise_score(img, FOCUS_REGION)
+    # Skärpan mäts separat med flera färska prover (se measure_sharpness) -
+    # ett enda foto är för brusigt (vind i löv/grenar) för att lita på.
+    baseline_score = measure_sharpness(token, FOCUS_REGION)
 
     log(
         f"Läge={mode} baslinje: skärpa={baseline_score:.0f} brus={baseline_noise:.2f} "
@@ -230,7 +232,7 @@ def _run_with_token(token: str) -> None:
         save_state(state)
         return
 
-    new_score = sharpness_score(new_img, FOCUS_REGION)
+    new_score = measure_sharpness(token, FOCUS_REGION)
     log(
         f"  Hälsa OK ({note}), brus {baseline_noise:.2f} -> {new_noise:.2f}. "
         f"Skärpa {baseline_score:.0f} -> {new_score:.0f}"
