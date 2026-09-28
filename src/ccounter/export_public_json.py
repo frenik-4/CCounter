@@ -131,6 +131,7 @@ def main() -> None:
                     "road_dir_north": 0,
                     "categories": {},
                     "hours": {},
+                    "comments": [],
                 }
 
             day = days[date]
@@ -254,6 +255,16 @@ def main() -> None:
             elif direction == "B_TO_A":
                 days[date]["road_dir_north"] += count
 
+        # --- Pass 5: dagskommentarer (t.ex. discgolf-event) ---
+        comment_cursor = db.conn.execute(
+            "SELECT date, comment FROM day_comments ORDER BY date, comment;"
+        )
+        for row in comment_cursor:
+            date = row["date"]
+            if date not in days:
+                continue
+            days[date]["comments"].append(row["comment"])
+
         # --- Uptime per dag ---
         uptime_per_day: dict[str, float | None] = {
             date: calculate_daily_uptime(db.conn, date)
@@ -303,6 +314,7 @@ def main() -> None:
                 "uptime_pct": round(uptime, 4) if uptime is not None else None,
                 "categories": day["categories"],
                 "hours": [hour for _, hour in sorted(day["hours"].items())],
+                "comments": day["comments"],
             }
 
         output = {

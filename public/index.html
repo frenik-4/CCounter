@@ -525,6 +525,42 @@
 
     .export-btn:hover { opacity: 0.85; }
 
+    /* Eventbanner (t.ex. discgolf-tävling) */
+    .event-banner {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      background: rgba(245, 158, 11, 0.10);
+      border: 1px solid rgba(245, 158, 11, 0.3);
+      border-radius: 14px;
+      padding: 12px 16px;
+      margin-bottom: 18px;
+      font-size: 14px;
+      color: #fde68a;
+    }
+
+    .event-banner-icon { font-size: 18px; line-height: 1.3; }
+
+    .event-banner-text strong { color: var(--text); }
+
+    .week-bar-wrap.has-event::after {
+      content: "";
+      position: absolute;
+      top: -10px;
+      left: 50%;
+      transform: translateX(-50%);
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      background: var(--amber);
+    }
+
+    .metric-pct {
+      color: var(--muted);
+      font-size: 13px;
+      margin-top: 2px;
+    }
+
     .footer {
       margin-top: 28px;
       color: var(--muted);
@@ -585,6 +621,8 @@
       </div>
     </div>
 
+    <div id="eventBanner" style="display:none"></div>
+
     <section class="grid">
       <div class="card">
         <div class="metric-label">Totalt vald dag</div>
@@ -614,12 +652,14 @@
         <div class="metric-label">Söderut</div>
         <div class="metric-value" id="dirSouth">–</div>
         <div class="metric-note">Fordon A→B</div>
+        <div class="metric-pct" id="dirSouthPct"></div>
       </div>
 
       <div class="card">
         <div class="metric-label">Norrut</div>
         <div class="metric-value" id="dirNorth">–</div>
         <div class="metric-note">Fordon B→A</div>
+        <div class="metric-pct" id="dirNorthPct"></div>
       </div>
     </section>
 
@@ -882,21 +922,26 @@
           date: d,
           total: day ? (day.road_traffic || 0) + (day.other || 0) : 0,
           uptime: day?.uptime_pct ?? null,
+          comments: day?.comments || [],
         };
       });
 
       const max = Math.max(...counts.map(c => c.total), 1);
 
-      for (const { date, total, uptime } of counts) {
+      for (const { date, total, uptime, comments } of counts) {
         const pct = total > 0 ? Math.max((total / max) * 100, 5) : 0;
         const isActive = date === currentDate;
+        const hasEvent = comments.length > 0;
 
         const d = new Date(date + "T12:00:00");
         const wd = WEEKDAY_SHORT[d.getDay()];
         const dateShort = date.slice(5).replace("-", "/");
 
         const wrap = document.createElement("div");
-        wrap.className = "week-bar-wrap" + (isActive ? " active" : "");
+        wrap.className = "week-bar-wrap"
+          + (isActive ? " active" : "")
+          + (hasEvent ? " has-event" : "");
+        if (hasEvent) wrap.title = comments.join("\n");
 
         wrap.innerHTML = `
           <div class="week-bar-value">${uptimeDotHtml(uptime)}${total > 0 ? total : ""}</div>
@@ -911,6 +956,27 @@
 
         container.appendChild(wrap);
       }
+    }
+
+    // ── Eventbanner ──────────────────────────────────────────────────────────
+
+    function renderEventBanner(comments) {
+      const el = document.getElementById("eventBanner");
+      if (!el) return;
+
+      if (!comments || comments.length === 0) {
+        el.style.display = "none";
+        el.innerHTML = "";
+        return;
+      }
+
+      el.style.display = "block";
+      el.innerHTML = comments.map(c => `
+        <div class="event-banner">
+          <div class="event-banner-icon">🥏</div>
+          <div class="event-banner-text"><strong>Känd händelse denna dag:</strong> ${c}</div>
+        </div>
+      `).join("");
     }
 
     // ── Snitt per veckodag ───────────────────────────────────────────────────
@@ -1131,6 +1197,9 @@
         setText("peakHourNote", "Flest passager");
         setText("dirSouth", 0);
         setText("dirNorth", 0);
+        setText("dirSouthPct", "");
+        setText("dirNorthPct", "");
+        renderEventBanner([]);
         renderCategoryBars({});
         renderWeekChart(allStats, date);
         renderHourChart([]);
@@ -1140,12 +1209,19 @@
 
       const roadTraffic = day.road_traffic || 0;
       const other = day.other || 0;
+      const south = day.dir_south ?? 0;
+      const north = day.dir_north ?? 0;
+      const dirTotal = south + north;
 
       setText("totalDay", roadTraffic + other);
       setText("roadTraffic", roadTraffic);
       setText("otherTraffic", other);
-      setText("dirSouth", day.dir_south ?? 0);
-      setText("dirNorth", day.dir_north ?? 0);
+      setText("dirSouth", south);
+      setText("dirNorth", north);
+      setText("dirSouthPct", dirTotal > 0 ? `${Math.round((south / dirTotal) * 100)}%` : "");
+      setText("dirNorthPct", dirTotal > 0 ? `${Math.round((north / dirTotal) * 100)}%` : "");
+
+      renderEventBanner(day.comments || []);
 
       const peak = getPeakHour(day.hours || []);
       if (peak && peak.total > 0) {
