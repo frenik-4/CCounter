@@ -6,6 +6,13 @@
 för egna/små ändringar, så en extern granskare (Graphite och/eller
 second-opinion-mcp) hinner titta på den innan den mergas.
 
+Graphite installerades på detta repo 2026-09-28 (via
+github.com/settings/installations) och fungerar - verifierat på PR #1.
+**Bekräftat samma dag: Graphite triggar INTE om automatiskt vid nya
+commits på en redan öppen PR** (samma beteende som i MyHome) - ingen ny
+check-run dök upp efter en uppföljningscommit. Bedöm alltså själv om en
+fix efter en granskning är rimlig istället för att vänta på en ny check.
+
 Efter varje ändring:
 1. Skapa en ny branch (`git checkout -b <kort-beskrivande-namn>`)
 2. Committa med ett beskrivande meddelande och `Co-Authored-By: Claude Sonnet 5 <noreply@anthropic.com>`
