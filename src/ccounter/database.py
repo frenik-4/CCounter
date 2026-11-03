@@ -391,6 +391,7 @@ class Database:
         return cursor.fetchall()
 
     def mark_day_unreliable(self, date: str, reason: str) -> None:
+        datetime.strptime(date, "%Y-%m-%d")  # ogiltigt datum ska ge fel direkt
         now = datetime.now().isoformat(timespec="seconds")
         self.conn.execute(
             """
