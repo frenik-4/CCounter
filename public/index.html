@@ -1117,7 +1117,7 @@
       el.innerHTML = comments.map(c => `
         <div class="event-banner">
           <div class="event-banner-icon">🥏</div>
-          <div class="event-banner-text"><strong>Känd händelse denna dag:</strong> ${c}</div>
+          <div class="event-banner-text"><strong>Känd händelse denna dag:</strong> ${escapeHtml(c)}</div>
         </div>
       `).join("");
     }
@@ -1220,7 +1220,7 @@
         cell.innerHTML = `
           <div class="month-cell-date">${dayNum}</div>
           ${day ? `<div class="month-cell-diff ${diffClass(diff)}">${unreliable ? "⚠" : formatDiff(diff)}</div>` : ""}
-          ${hasEvent ? `<div class="month-cell-event" title="${day.comments.join('\n')}"></div>` : ""}
+          ${hasEvent ? `<div class="month-cell-event" title="${escapeHtml(day.comments.join('\n'))}"></div>` : ""}
         `;
 
         if (day) {
