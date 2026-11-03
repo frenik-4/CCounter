@@ -91,6 +91,42 @@ def get_zoom_focus(token: str) -> dict:
     return _get("GetZoomFocus", token)[0]["value"]["ZoomFocus"]
 
 
+def is_autofocus_disabled(token: str) -> bool:
+    result = _post(
+        "GetAutoFocus",
+        [{"cmd": "GetAutoFocus", "action": 0, "param": {"channel": 0}}],
+        token,
+    )
+    return bool(result[0]["value"]["AutoFocus"]["disable"])
+
+
+def disable_autofocus(token: str) -> bool:
+    result = _post(
+        "SetAutoFocus",
+        [{"cmd": "SetAutoFocus", "action": 0, "param": {"AutoFocus": {"channel": 0, "disable": 1}}}],
+        token,
+    )
+    return result[0].get("code") == 0
+
+
+def ensure_autofocus_disabled(token: str) -> bool:
+    """
+    Grundorsaken till timmar av felsökning 2026-09-28: kamerans egna
+    kontinuerliga autofokus var PÅSLAGEN hela tiden och kämpade emot
+    varje manuellt FocusPos-kommando - bekräftat genom att samma
+    nominella fokusläge flimrade mellan skärpa ~13 och ~665 inom loppet
+    av mindre än en sekund. Måste vara avstängd för att manuell
+    fokusjustering ska vara meningsfull överhuvudtaget.
+
+    Returnerar True om AF var/blev avstängd, False om det misslyckades
+    (t.ex. tillfälligt API-fel) - anropare bör då avstå från att lita på
+    skärpemätningar den körningen.
+    """
+    if is_autofocus_disabled(token):
+        return True
+    return disable_autofocus(token) and is_autofocus_disabled(token)
+
+
 def set_focus_pos(token: str, pos: int) -> bool:
     result = _post(
         "StartZoomFocus",
@@ -174,25 +210,44 @@ def sharpness_score(img, region: tuple[int, int, int, int]) -> float:
 def measure_sharpness(
     token: str,
     region: tuple[int, int, int, int],
-    samples: int = 3,
-    spacing_seconds: float = 0.4,
+    max_samples: int = 6,
+    spacing_seconds: float = 1.5,
+    stability_ratio: float = 0.85,
 ) -> float:
     """
-    Ett enda foto är för brusigt att lita på för fokus-/ISP-beslut - vind
-    som rör löv/grenar i mätregionen kan tanka skärpepoängen i en enskild
-    bildruta även vid perfekt fokus (upptäckt vid felsökning 2026-09-28,
-    ~500 vid stilla ögonblick men enstaka prov ner mot ~10). Tar flera
-    prover och behåller det BÄSTA: ett vindstilla ögonblick som visar att
-    positionen faktiskt är skarp väger tyngre än att ett annat prov råkade
-    fångas mitt i ett vindkast.
+    Ett enda foto direkt efter en fokusflytt är opålitligt - inte bara pga
+    brus (vind i löv/grenar), utan för att objektivets motor kan behöva
+    flera sekunder att verkligen färdigställa sig efter flera
+    riktningsbyten i rad. En fast väntetid visade sig gissa fel: 1.5s var
+    för kort, men samma läge kunde ändå ge ett dåligt värde efter 5s om
+    föregående körning nyss gjort flera snabba riktningsbyten (bekräftat
+    genom felsökning 2026-09-28 - se camera_focus.py:s docstring).
+
+    Istället för att gissa en konstant: ta prover med paus emellan och
+    sluta så fort TVÅ i följd är inbördes stabila (inom stability_ratio
+    av varandra) - det är det starkaste tecknet på att motorn verkligen
+    har satt sig. Om det aldrig stabiliserar sig inom max_samples
+    (ovanligt - tyder på ett djupare problem, t.ex. att autofokus ändå
+    är påslagen) returneras sista provet ändå, så körningen inte hänger
+    sig för evigt.
     """
-    scores = []
-    for i in range(samples):
+    previous = None
+    last = 0.0
+
+    for i in range(max_samples):
         img = get_snapshot(token)
-        scores.append(sharpness_score(img, region))
-        if i < samples - 1:
+        last = sharpness_score(img, region)
+
+        if previous is not None and previous > 0:
+            ratio = min(last, previous) / max(last, previous)
+            if ratio >= stability_ratio:
+                return last
+
+        previous = last
+        if i < max_samples - 1:
             time.sleep(spacing_seconds)
-    return max(scores)
+
+    return last
 
 
 def noise_score(img, region: tuple[int, int, int, int]) -> float:

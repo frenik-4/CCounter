@@ -27,6 +27,7 @@ from datetime import datetime
 
 from src.ccounter.config import FOCUS_REGION
 from src.ccounter.reolink_client import (
+    ensure_autofocus_disabled,
     exposure_health,
     get_isp,
     get_snapshot,
@@ -45,6 +46,13 @@ SETTLE_SECONDS = 4  # ge autoexponeringen tid att stabilisera innan mätning
 MIN_SCORE_RATIO_TO_KEEP = 0.97  # tillåt att behålla vid i princip oförändrad skärpa
 MAX_NOISE_RATIO = 3.0  # nr3d=0 gav ~18x - detta ger bred marginal ändå
 MIN_ABSOLUTE_SCORE_TO_TRUST = 5.0  # under detta är skärpemåttet för brusigt för att lita på
+
+# TILLFÄLLIGT PÅSLAGET (2026-09-28) - se DRY_RUN i camera_focus.py för
+# full förklaring: kameran uppvisar episoder av flera sekunders
+# sammanhängande dålig skärpa av oklar orsak, vilket kan lura även denna
+# moduls skärpejämförelser. Kör bara testet och LOGGA vad utfallet skulle
+# blivit, men lämna alltid inställningen som den var innan.
+DRY_RUN = True
 
 # (isp-fält, nytt värde, vilket ljusläge det får testas i: "day"/"night"/"both")
 # Ordning = testprioritet. exposure=Manual utelämnat med avsikt (kräver att
@@ -144,6 +152,13 @@ def _run_with_token(token: str) -> None:
         log("Snapshot gick inte att avkoda, avbryter.")
         return
 
+    if not ensure_autofocus_disabled(token):
+        log(
+            "Kunde inte bekräfta att kamerans egna autofokus är avstängd - "
+            "avbryter (skärpemätningar är annars opålitliga)."
+        )
+        return
+
     mode = "night" if is_ir_mode(img) else "day"
     _, baseline_note = exposure_health(img)
     baseline_noise = noise_score(img, FOCUS_REGION)
@@ -232,33 +247,56 @@ def _run_with_token(token: str) -> None:
         save_state(state)
         return
 
-    new_score = measure_sharpness(token, FOCUS_REGION)
+    log(f"  Hälsa OK ({note}), brus {baseline_noise:.2f} -> {new_noise:.2f}.")
+
+    # Den tidiga skärpe-baslinjen (mätt innan set_isp/settle/hälsokontroll)
+    # kan vara flera sekunder gammal och missvisande - dis/kondens ändras
+    # snabbt (uppmätt: samma läge gav 511 kl 09:35 och 11 kl 09:39 samma
+    # morgon). Mät om BÅDA lägena nära i tid istället för att lita på den
+    # gamla baslinjen.
+    recheck_candidate = measure_sharpness(token, FOCUS_REGION)
+
+    set_isp(token, {field: previous_value})
+    time.sleep(SETTLE_SECONDS)
+    recheck_previous = measure_sharpness(token, FOCUS_REGION)
+
     log(
-        f"  Hälsa OK ({note}), brus {baseline_noise:.2f} -> {new_noise:.2f}. "
-        f"Skärpa {baseline_score:.0f} -> {new_score:.0f}"
+        f"  Omkontroll nära i tid: {field}={value} -> {recheck_candidate:.0f}  "
+        f"{field}={previous_value} -> {recheck_previous:.0f}"
     )
 
-    # Vid en väldigt låg baslinje (t.ex. helt statisk/svart scen) är
-    # kvotjämförelsen opålitlig - en obetydlig absolut skillnad kan se ut
-    # som en stor procentuell förändring åt endera hållet. Lita då bara på
+    # Vid en väldigt låg baslinje (t.ex. tät dis) är kvotjämförelsen
+    # opålitlig - en obetydlig absolut skillnad kan se ut som en stor
+    # procentuell förändring åt endera hållet. Lita då bara på
     # hälso-/brusspärrarna ovan istället för skärpekvoten.
-    baseline_unreliable = baseline_score < MIN_ABSOLUTE_SCORE_TO_TRUST
+    baseline_unreliable = recheck_previous < MIN_ABSOLUTE_SCORE_TO_TRUST
 
-    if baseline_unreliable or new_score >= baseline_score * MIN_SCORE_RATIO_TO_KEEP:
-        log(f"  Behåller {field}={value}.")
+    if baseline_unreliable or recheck_candidate >= recheck_previous * MIN_SCORE_RATIO_TO_KEEP:
+        if DRY_RUN:
+            # previous_value är redan aktivt (satt ovan för omkontrollen) -
+            # rör inget på riktigt, bara logga vad som skulle ha hänt.
+            log(f"  [DRY RUN] Skulle ha behållit {field}={value}, men rör inget just nu.")
+            outcome = "would_keep_dry_run"
+        else:
+            set_isp(token, {field: value})
+            log(f"  Behåller {field}={value}.")
+            outcome = "kept"
         state["trials"][key] = {
-            "outcome": "kept",
-            "baseline_score": baseline_score,
-            "new_score": new_score,
+            "outcome": outcome,
+            "baseline_score": recheck_previous,
+            "new_score": recheck_candidate,
             "timestamp": datetime.now().isoformat(timespec="seconds"),
         }
     else:
-        set_isp(token, {field: previous_value})
-        log(f"  Sämre skärpa ({new_score:.0f} < {baseline_score:.0f}), återställer till {field}={previous_value}.")
+        # previous_value är redan aktivt (satt ovan för omkontrollen).
+        log(
+            f"  Sämre skärpa ({recheck_candidate:.0f} < {recheck_previous:.0f}), "
+            f"återställer till {field}={previous_value}."
+        )
         state["trials"][key] = {
             "outcome": "reverted_worse_sharpness",
-            "baseline_score": baseline_score,
-            "new_score": new_score,
+            "baseline_score": recheck_previous,
+            "new_score": recheck_candidate,
             "timestamp": datetime.now().isoformat(timespec="seconds"),
         }
 
