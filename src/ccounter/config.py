@@ -183,6 +183,10 @@ CAM_URL = os.getenv("CAM", "").rstrip("/")
 CAM_USER = os.getenv("CAM_USER", "")
 CAM_PSWD = os.getenv("CAM_PSWD", "")
 
+# Home Assistant - används av health_check.py för pushnotis (notify.pixel_9).
+HA_URL = os.getenv("HA_URL", "").rstrip("/")
+HA_TOKEN = os.getenv("HA_TOKEN", "")
+
 # Vägytan runt main_count_line (där fordon faktiskt räknas) - det är den
 # skärpan som spelar roll, inte hela bilden. Räknas ut automatiskt från
 # LINES med marginal, men går att hårdkoda via FOCUS_REGION i .env
