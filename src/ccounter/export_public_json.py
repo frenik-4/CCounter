@@ -266,6 +266,13 @@ def main() -> None:
                 continue
             days[date]["comments"].append(row["comment"])
 
+        # --- Opålitliga dagar (känd datakvalitetsbrist) ---
+        unreliable_days = db.get_unreliable_days()
+        for date, day in days.items():
+            reason = unreliable_days.get(date)
+            day["unreliable"] = reason is not None
+            day["unreliable_reason"] = reason
+
         # --- Uptime per dag ---
         uptime_per_day: dict[str, float | None] = {
             date: calculate_daily_uptime(db.conn, date)
@@ -280,7 +287,7 @@ def main() -> None:
 
         for date, day in days.items():
             uptime = uptime_per_day.get(date)
-            if uptime is None or uptime < 0.95:
+            if uptime is None or uptime < 0.95 or day["unreliable"]:
                 continue
             wd = datetime.strptime(date, "%Y-%m-%d").weekday()
             wd_road[wd] += day["road_traffic"]
@@ -306,7 +313,7 @@ def main() -> None:
         wd_samples: list[list[int]] = [[] for _ in range(7)]
         for date, day in days.items():
             uptime = uptime_per_day.get(date)
-            if uptime is None or uptime < 0.95 or day["comments"]:
+            if uptime is None or uptime < 0.95 or day["comments"] or day["unreliable"]:
                 continue
             wd = datetime.strptime(date, "%Y-%m-%d").weekday()
             wd_samples[wd].append(day["road_traffic"])
@@ -333,7 +340,7 @@ def main() -> None:
             # trafiksiffra i sig ett datahål (kameran låg nere), inte ett
             # tecken på verkligen mindre trafik, och avvikelsen blir
             # missvisande (t.ex. "-100" bara för att halva dagen saknas).
-            if median_raw is None or uptime is None or uptime < 0.95:
+            if median_raw is None or uptime is None or uptime < 0.95 or day["unreliable"]:
                 vs_median = None
             else:
                 vs_median = round(day["road_traffic"] - median_raw)
@@ -351,6 +358,8 @@ def main() -> None:
                 "hours": [hour for _, hour in sorted(day["hours"].items())],
                 "comments": day["comments"],
                 "vs_weekday_median": vs_median,
+                "unreliable": day["unreliable"],
+                "unreliable_reason": day["unreliable_reason"],
             }
 
         output = {

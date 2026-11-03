@@ -145,6 +145,19 @@ class Database:
             """
         )
 
+        # Dagar där räkningen är känd för att vara opålitlig (t.ex. suddig
+        # kamerabild som gav färre upptäckta fordon). Exkluderas från
+        # veckodagssnitt/medianer och visas som opålitliga på publika sidan.
+        self.conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS unreliable_days (
+                date TEXT PRIMARY KEY,
+                reason TEXT NOT NULL,
+                created_at TEXT NOT NULL
+            );
+            """
+        )
+
         self.conn.execute(
             "CREATE INDEX IF NOT EXISTS idx_events_timestamp ON events(timestamp);"
         )
@@ -376,6 +389,22 @@ class Database:
         query += " ORDER BY date;"
         cursor = self.conn.execute(query, params)
         return cursor.fetchall()
+
+    def mark_day_unreliable(self, date: str, reason: str) -> None:
+        now = datetime.now().isoformat(timespec="seconds")
+        self.conn.execute(
+            """
+            INSERT INTO unreliable_days (date, reason, created_at)
+            VALUES (?, ?, ?)
+            ON CONFLICT(date) DO UPDATE SET reason = excluded.reason;
+            """,
+            (date, reason, now),
+        )
+        self.conn.commit()
+
+    def get_unreliable_days(self) -> dict[str, str]:
+        cursor = self.conn.execute("SELECT date, reason FROM unreliable_days;")
+        return {row["date"]: row["reason"] for row in cursor}
 
     def close(self) -> None:
         self.conn.close()

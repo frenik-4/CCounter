@@ -549,6 +549,8 @@
       align-self: flex-end;
     }
 
+    .month-cell.unreliable { border-style: dashed; border-color: var(--amber); }
+
     .diff-pos { color: var(--green); }
     .diff-neg { color: #f87171; }
     .diff-zero { color: var(--muted); }
@@ -721,6 +723,7 @@
     </div>
 
     <div id="eventBanner" style="display:none"></div>
+    <div id="unreliableBanner" style="display:none"></div>
 
     <section class="grid">
       <div class="card">
@@ -1073,6 +1076,25 @@
       }
     }
 
+    // ── Banner för opålitliga dagar ─────────────────────────────────────────
+
+    function renderUnreliableBanner(reason) {
+      const el = document.getElementById("unreliableBanner");
+      if (!el) return;
+      if (!reason) {
+        el.style.display = "none";
+        el.innerHTML = "";
+        return;
+      }
+      el.style.display = "block";
+      el.innerHTML = `
+        <div class="event-banner">
+          <div class="event-banner-icon">⚠</div>
+          <div class="event-banner-text"><strong>Opålitlig räkning denna dag:</strong> ${reason}.
+          Siffrorna är sannolikt för låga och ingår inte i snitt eller jämförelser.</div>
+        </div>`;
+    }
+
     // ── Eventbanner ──────────────────────────────────────────────────────────
 
     function renderEventBanner(comments) {
@@ -1185,16 +1207,20 @@
         if (dateStr === selectedDate) cell.classList.add("selected");
 
         const diff = day?.vs_weekday_median;
+        const unreliable = !!day?.unreliable;
+        if (unreliable) cell.classList.add("unreliable");
         const hasEvent = day?.comments && day.comments.length > 0;
 
         cell.innerHTML = `
           <div class="month-cell-date">${dayNum}</div>
-          ${day ? `<div class="month-cell-diff ${diffClass(diff)}">${formatDiff(diff)}</div>` : ""}
+          ${day ? `<div class="month-cell-diff ${diffClass(diff)}">${unreliable ? "⚠" : formatDiff(diff)}</div>` : ""}
           ${hasEvent ? `<div class="month-cell-event" title="${day.comments.join('\n')}"></div>` : ""}
         `;
 
         if (day) {
-          cell.title = hasEvent
+          cell.title = unreliable
+            ? `${dateStr}\n${day.road_traffic} fordon (opålitlig dag: ${day.unreliable_reason})`
+            : hasEvent
             ? `${dateStr}\n${day.road_traffic} fordon (${formatDiff(diff)} mot normalt)\n${day.comments.join("\n")}`
             : `${dateStr}\n${day.road_traffic} fordon (${formatDiff(diff)} mot normalt)`;
           cell.addEventListener("click", () => {
@@ -1435,6 +1461,7 @@
         setText("dirSouthPct", "");
         setText("dirNorthPct", "");
         renderEventBanner([]);
+        renderUnreliableBanner(null);
         renderMonthCalendar(allStats, date);
         renderCategoryBars({});
         renderWeekChart(allStats, date);
@@ -1458,6 +1485,7 @@
       setText("dirNorthPct", dirTotal > 0 ? `${Math.round((north / dirTotal) * 100)}%` : "");
 
       renderEventBanner(day.comments || []);
+      renderUnreliableBanner(day.unreliable ? day.unreliable_reason : null);
       renderMonthCalendar(allStats, date);
 
       const peak = getPeakHour(day.hours || []);
